@@ -15,7 +15,7 @@
         <div class="title-left">
           <h1 class="title">Gemini 3 Pro Image Preview API 调用器</h1>
           <p class="subtitle">
-            支持：Host / API Key / 系统提示词 / 提示词（可空）/ 多张输入图片（可选）/ 比例（可选）/ 分辨率（可选）/ temperature / topP / 预设 / JSON 请求体
+            支持：Host / API Key / 系统提示词 / 提示词 / 输入图片（可选）/ 比例（可选）/ 分辨率（可选）/ temperature / topP / 预设 / JSON 请求体
           </p>
         </div>
 
@@ -41,7 +41,7 @@
     <section class="card">
       <h2 class="section-title">配置</h2>
 
-      <form id="form" autocomplete="off" novalidate>
+      <form id="form" autocomplete="off">
         <!-- Host / Key 区：不随预设变化 -->
         <div class="grid">
           <label class="field">
@@ -82,30 +82,29 @@
             </label>
 
             <label class="field full">
-              <span class="label">提示词（可选，可留空）</span>
-              <textarea id="prompt" rows="5" placeholder="例如：生成一张极简风的咖啡品牌海报……（可留空，仅用图片/系统提示也可）"></textarea>
-              <span class="hint">如果留空，会传入一个空文本 part（{"text":""}）。</span>
+              <span class="label">提示词（必填）</span>
+              <textarea id="prompt" rows="5" placeholder="例如：生成一张极简风的咖啡品牌海报，包含清晰可读的标题文字“MOONBEAN”，风格高级。"></textarea>
             </label>
 
             <div class="field full">
-              <span class="label">输入图片（可选，支持多张，用于图像编辑/参考）</span>
-              <div id="dropZone" class="dropzone" role="button" tabindex="0" aria-label="选择或拖拽图片">
+              <span class="label">输入图片（可选，用于图像编辑/参考）</span>
+              <div id="dropZone" class="dropzone" role="button" tabindex="0">
                 <div class="dz-main">
                   <strong>拖拽图片到这里</strong>
-                  <span>或点击选择文件（可多选，PNG/JPEG/WebP/HEIC 等）</span>
+                  <span>或点击选择文件（PNG/JPEG/WebP/HEIC 等）</span>
                 </div>
-                <input id="imageFile" type="file" accept="image/*" multiple />
+                <input id="imageFile" type="file" accept="image/*" />
               </div>
 
-              <div id="imagePreview" class="inppreview hidden">
-                <div class="inphead">
-                  <div id="imageMeta" class="inpmeta"></div>
-                  <button id="clearImage" type="button" class="btn secondary">清空图片</button>
+              <div id="imagePreview" class="preview hidden">
+                <img id="imagePreviewImg" alt="输入图片预览" />
+                <div class="preview-meta">
+                  <div id="imageMeta"></div>
+                  <button id="clearImage" type="button" class="btn secondary">移除图片</button>
                 </div>
-                <div id="imagePreviewGrid" class="inpgallery"></div>
               </div>
 
-              <span class="hint">提示：图片会作为 parts 依次传入；你可以用提示词描述它们的关系（如“第一张作为主体、第二张作为风格参考”）。</span>
+              <span class="hint">上传图片后，可在提示词中写“把这张图改成…… / 在保持主体不变的情况下……”</span>
             </div>
 
             <label class="field">
@@ -159,7 +158,7 @@
           <label class="field full">
             <span class="label">请求体 JSON（将直接作为 POST body 发送）</span>
             <textarea id="requestBodyJson" rows="16" spellcheck="false"
-              placeholder='例如：{"contents":[{"role":"user","parts":[{"text":""},{"inline_data":{"mime_type":"image/png","data":"..."}}]}],"generationConfig":{"responseModalities":["Image"]}}'></textarea>
+              placeholder='例如：{"contents":[{"role":"user","parts":[{"text":"..." }]}],"generationConfig":{"responseModalities":["Image"]}}'></textarea>
             <span class="hint">提示：Host / Key 不在此 JSON 中；仍由上方固定配置决定。</span>
           </label>
         </div>
@@ -228,7 +227,6 @@
     </footer>
   </main>
 
-  <!-- 兼容性：使用非 module 脚本，避免旧 Safari 的 module 解析差异 -->
-  <script src="./app.js"></script>
+  <script type="module" src="./app.js"></script>
 </body>
 </html>
