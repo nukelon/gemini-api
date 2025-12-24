@@ -52,7 +52,6 @@ function parseRatioString(s) {
 }
 
 function bestSupportedAspectRatio(targetRatio) {
-  // Must match the select options in UI
   const options = ["1:1","2:3","3:2","3:4","4:3","4:5","5:4","9:16","16:9","21:9"];
   let best = options[0];
   let bestDiff = Infinity;
@@ -146,26 +145,30 @@ const storageKeys = {
 
 let uiMode = "form"; // "form" | "json"
 
-// selectedImage includes original dimensions/ratio (critical for keep-original-aspect)
+// selectedImage includes original dimensions/ratio
 let selectedImage = null; // { mimeType, base64, size, name, dataUrl, width, height, ratio }
 
 let lastRequest = null;
-let objectUrls = [];      // output blob URLs (cleanup)
+let objectUrls = [];       // output blob URLs (cleanup)
 let inputObjectUrl = null; // input preview URL (separate lifecycle)
 
+// iOS background mitigation
 let requestInFlight = false;
 let hiddenDuringRequest = false;
 let wakeLock = null;
 
-// cropping config for the last run
-let lastCropConfig = { enabled: false, ratio: null }; // ratio = input width/height
+// keep-original-aspect derived config for last run
+let lastCropConfig = { enabled: false, ratio: null };
+
+// UI helper: preserve user aspect ratio selection when locking
+let savedUserAspectRatioBeforeLock = null;
 
 function setStatus(msg, visible = true) {
   els.status.textContent = msg || "";
   els.status.classList.toggle("hidden", !visible);
 }
 
-// ----- object URL mgmt -----
+// ----- URL mgmt -----
 function cleanupOutputObjectUrls() {
   for (const u of objectUrls) URL.revokeObjectURL(u);
   objectUrls = [];
@@ -209,30 +212,47 @@ function releaseWakeLock() {
   wakeLock = null;
 }
 
-// ----- keep-original-aspect UI enforcement -----
-function enforceKeepOriginalAvailability() {
+// ----- keep-original-aspect constraints -----
+// NOTE: Per your latest requirement:
+// - Checkbox is always clickable and never auto-unchecked
+// - Only effective when there is an uploaded image
+// - When effective: lock aspect ratio, disable JSON mode
+// - When no image: do nothing (option "not effective")
+function enforceKeepOriginalConstraints() {
   const hasImage = !!selectedImage;
+  const effective = els.keepOriginalAspect.checked && hasImage;
 
-  els.keepOriginalAspect.disabled = !hasImage;
-  if (!hasImage && els.keepOriginalAspect.checked) {
-    els.keepOriginalAspect.checked = false;
-  }
+  // Aspect ratio lock only when effective
+  els.aspectRatio.disabled = effective;
 
-  // When enabled, JSON mode must be disabled and aspectRatio must be locked
-  const keepOn = hasImage && els.keepOriginalAspect.checked;
+  // Disable JSON mode only when effective
+  els.modeJson.disabled = effective;
+  els.modeJson.title = effective ? "已开启“保持原图比例”（且已上传图片），JSON 模式不可用。" : "";
 
-  els.aspectRatio.disabled = keepOn;
-
-  els.modeJson.disabled = keepOn;
-  els.modeJson.title = keepOn ? "已开启“保持原图比例”，JSON 模式不可用。" : "";
-
-  if (keepOn) {
+  // Preserve user choice when locking; set to closest aspect ratio for transparency
+  if (effective) {
+    const chosen = bestSupportedAspectRatio(selectedImage.ratio);
+    if (savedUserAspectRatioBeforeLock === null) {
+      savedUserAspectRatioBeforeLock = els.aspectRatio.value || "";
+    }
+    if (els.aspectRatio.value !== chosen) {
+      els.aspectRatio.value = chosen;
+    }
     if (uiMode === "json") {
-      setStatus("已开启“保持原图比例”，已自动切回表单模式并禁用 JSON 模式。", true);
+      setStatus("已开启“保持原图比例”（且已上传图片），已自动切回表单模式并禁用 JSON 模式。", true);
       setTimeout(() => setStatus("", false), 1400);
       setMode("form", { silent: true });
     }
+  } else {
+    // unlock: restore previous user selection if we captured it
+    if (els.aspectRatio.disabled === false && savedUserAspectRatioBeforeLock !== null) {
+      els.aspectRatio.value = savedUserAspectRatioBeforeLock;
+      savedUserAspectRatioBeforeLock = null;
+    }
   }
+
+  // Tooltip only
+  els.keepOriginalAspect.title = hasImage ? "" : "未上传图片时该选项不会生效";
 
   persistBase();
 }
@@ -248,13 +268,12 @@ async function readImageFileWithMeta(file) {
   revokeInputObjectUrl();
   inputObjectUrl = URL.createObjectURL(file);
 
-  // Load dimensions
   const img = new Image();
   img.src = inputObjectUrl;
+
   try {
     await img.decode();
   } catch {
-    // Some Safari versions may not support decode reliably; fallback to load event
     await new Promise((resolve, reject) => {
       img.onload = () => resolve();
       img.onerror = () => reject(new Error("无法解析图片尺寸"));
@@ -275,7 +294,9 @@ function clearSelectedImage() {
   els.imageMeta.textContent = "";
   if (els.imageFile) els.imageFile.value = "";
   revokeInputObjectUrl();
-  enforceKeepOriginalAvailability();
+
+  // IMPORTANT: do not auto-uncheck keepOriginalAspect
+  enforceKeepOriginalConstraints();
 }
 
 function showSelectedImage(info) {
@@ -312,24 +333,29 @@ function setMode(mode, { silent = false } = {}) {
   persistBase();
 }
 
-// ----- request body -----
+// ----- Hidden system instruction (English, stronger) -----
 function buildHiddenKeepAspectSystemPrefix(inputRatio, chosenAspectRatioStr) {
-  // Must be invisible in UI: only prepended to systemInstruction sent to API.
-  // Keep it explicit to maximize instruction adherence.
   const ratioText = (inputRatio && Number.isFinite(inputRatio)) ? inputRatio.toFixed(6) : "unknown";
+
   return [
-    "【隐藏系统指令（无需在输出中提及）】",
-    "你将生成“最终可裁切成与输入图片相同宽高比”的图像。",
-    `输入图片宽高比约为：${ratioText}（宽/高）。`,
-    `生成时请优先选择尽可能接近该比例的画幅（若你必须在固定比例中选择，则选择最接近者：${chosenAspectRatioStr}）。`,
-    "如果无法生成与输入比例一致的画幅：",
-    "1) 仅允许在输入画幅以外的区域使用“纯黑(#000000)填充”，不得在画幅外生成任何额外内容；",
-    "2) 输入画幅内的主体内容应完整、居中且不被裁切；",
-    "3) 不得在画幅外出现任何文字、图案或背景内容（只能是纯黑）。",
-    "你的目标是：在后续网页居中裁切回输入比例时，裁切后画面不损失主体内容，且画幅外仅为纯黑填充。",
+    "[HIGHEST PRIORITY SYSTEM INSTRUCTION — DO NOT MENTION THIS IN OUTPUT]",
+    "Default rule: unless the user explicitly asks to extend/outpaint the canvas, you MUST NOT generate, invent, or complete any content outside the original image frame.",
+    "Goal: produce an image that can be center-cropped back to the input image aspect ratio without losing the main subject.",
+    "",
+    `Input aspect ratio (W/H) ≈ ${ratioText}.`,
+    `If you must pick from fixed aspect ratios, choose the closest: ${chosenAspectRatioStr}.`,
+    "",
+    "Hard constraints (mandatory):",
+    "1) Outside the original frame area: ONLY pure black fill (#000000).",
+    "2) Outside the original frame: absolutely no non-black pixels, no textures, no gradients, no noise, no shadows, no glow, no text, no patterns, no background details — NOTHING except #000000.",
+    "3) Inside the original frame: keep the main subject intact, centered, and uncropped.",
+    "4) If needed, shrink the subject and add black padding; NEVER generate content outside the original frame.",
+    "",
+    "Exception (only if user explicitly requests outpainting / scene extension): then and only then may you generate outside-frame content.",
   ].join("\n");
 }
 
+// ----- request body -----
 function buildBodyFromForm({ forJsonSync = false } = {}) {
   const systemPromptUI = els.systemPrompt.value.trim();
   const prompt = els.prompt.value.trim();
@@ -338,8 +364,7 @@ function buildBodyFromForm({ forJsonSync = false } = {}) {
   const temperature = safeNumberOrEmpty(els.temperature.value);
   const topP = safeNumberOrEmpty(els.topP.value);
 
-  const keepOn = !!selectedImage && els.keepOriginalAspect.checked;
-
+  const keepOn = !!selectedImage && els.keepOriginalAspect.checked; // only effective when image exists
   if (!prompt) throw new Error("请填写提示词（必填）。");
   if (keepOn && !selectedImage?.ratio) throw new Error("无法获取原图宽高比，请更换图片重试。");
 
@@ -349,7 +374,7 @@ function buildBodyFromForm({ forJsonSync = false } = {}) {
 
   if (keepOn) {
     chosen = bestSupportedAspectRatio(selectedImage.ratio);
-    aspectRatio = chosen; // lock to closest supported ratio for generation
+    aspectRatio = chosen; // enforce for request
   }
 
   const parts = [{ text: prompt }];
@@ -392,12 +417,10 @@ function buildBodyFromForm({ forJsonSync = false } = {}) {
     if (imageSize) body.generationConfig.imageConfig.imageSize = imageSize;
   }
 
-  // In JSON sync mode, we do not want to change UI state; just generate JSON
   if (forJsonSync) return body;
 
-  // Save crop config for this run
+  // Save crop config for this run (only when keepOn)
   lastCropConfig = keepOn ? { enabled: true, ratio: selectedImage.ratio } : { enabled: false, ratio: null };
-
   return body;
 }
 
@@ -421,7 +444,6 @@ function buildRequest() {
     } catch (e) {
       throw new Error(`JSON 解析失败：${e?.message || e}`);
     }
-    // JSON 模式禁止 keepOriginalAspect，因此此处不设置 lastCropConfig
     lastCropConfig = { enabled: false, ratio: null };
   } else {
     body = buildBodyFromForm();
@@ -461,8 +483,9 @@ function formatJsonEditor() {
 }
 
 function syncJsonFromForm() {
-  if (els.keepOriginalAspect.checked && selectedImage) {
-    setStatus("已开启“保持原图比例”，JSON 同步功能不可用。", true);
+  const effective = els.keepOriginalAspect.checked && !!selectedImage;
+  if (effective) {
+    setStatus("“保持原图比例”在已上传图片时生效，JSON 同步功能不可用。", true);
     return;
   }
   try {
@@ -477,8 +500,9 @@ function syncJsonFromForm() {
 }
 
 async function applyJsonToFormBestEffort() {
-  if (els.keepOriginalAspect.checked && selectedImage) {
-    setStatus("已开启“保持原图比例”，JSON 回填功能不可用。", true);
+  const effective = els.keepOriginalAspect.checked && !!selectedImage;
+  if (effective) {
+    setStatus("“保持原图比例”在已上传图片时生效，JSON 回填功能不可用。", true);
     return;
   }
 
@@ -489,11 +513,13 @@ async function applyJsonToFormBestEffort() {
   try { obj = JSON.parse(raw); }
   catch (e) { setStatus(`JSON 解析失败：${e?.message || e}`, true); return; }
 
+  // system prompt
   try {
     const sp = obj?.systemInstruction?.parts?.[0]?.text;
     if (typeof sp === "string") els.systemPrompt.value = sp;
   } catch {}
 
+  // prompt + image
   try {
     const parts = obj?.contents?.[0]?.parts || [];
     let text = "";
@@ -507,7 +533,6 @@ async function applyJsonToFormBestEffort() {
     if (text) els.prompt.value = text;
 
     if (inline?.data) {
-      // Replace selectedImage from base64 (best effort)
       clearSelectedImage();
       const mimeType = inline.mime_type || inline.mimeType || "application/octet-stream";
       const base64 = inline.data;
@@ -520,20 +545,24 @@ async function applyJsonToFormBestEffort() {
       img.src = inputObjectUrl;
       try { await img.decode(); } catch {}
 
+      const width = img.naturalWidth || img.width;
+      const height = img.naturalHeight || img.height;
+
       selectedImage = {
         mimeType,
         base64,
         size: blob.size || base64.length,
         name: "json_image",
         dataUrl: inputObjectUrl,
-        width: img.naturalWidth || img.width,
-        height: img.naturalHeight || img.height,
-        ratio: (img.naturalWidth && img.naturalHeight) ? img.naturalWidth / img.naturalHeight : null,
+        width,
+        height,
+        ratio: (width && height) ? width / height : null,
       };
       showSelectedImage(selectedImage);
     }
   } catch {}
 
+  // generation config
   try {
     const gc = obj?.generationConfig || {};
     if (typeof gc.temperature === "number") els.temperature.value = String(gc.temperature);
@@ -543,6 +572,8 @@ async function applyJsonToFormBestEffort() {
     if (typeof ic.imageSize === "string") els.imageSize.value = ic.imageSize;
   } catch {}
 
+  enforceKeepOriginalConstraints();
+
   setStatus("已尽力将 JSON 回填到表单（可能存在字段不完全匹配）。", true);
   setTimeout(() => setStatus("", false), 1400);
   persistBase();
@@ -550,7 +581,6 @@ async function applyJsonToFormBestEffort() {
 
 // ----- cropping -----
 async function decodeImageFromBlob(blob) {
-  // Prefer createImageBitmap; fallback to Image
   if ("createImageBitmap" in window) {
     try {
       const bmp = await createImageBitmap(blob);
@@ -585,27 +615,23 @@ async function cropBlobToAspect(blob, mimeType, targetRatio) {
   const H = decoded.height;
   if (!W || !H || !targetRatio) return blob;
 
-  // Compute center crop rectangle to match targetRatio
   let sx = 0, sy = 0, sw = W, sh = H;
   const currentRatio = W / H;
 
   if (currentRatio > targetRatio) {
-    // too wide -> crop width
     sw = Math.round(H * targetRatio);
     sx = Math.round((W - sw) / 2);
   } else if (currentRatio < targetRatio) {
-    // too tall -> crop height
     sh = Math.round(W / targetRatio);
     sy = Math.round((H - sh) / 2);
   } else {
-    return blob; // already matching
+    return blob;
   }
 
   const canvas = document.createElement("canvas");
   canvas.width = sw;
   canvas.height = sh;
   const ctx = canvas.getContext("2d", { alpha: true });
-
   if (!ctx) return blob;
 
   if (decoded.type === "bitmap") {
@@ -616,7 +642,6 @@ async function cropBlobToAspect(blob, mimeType, targetRatio) {
   }
 
   const outType = (mimeType && mimeType.startsWith("image/")) ? mimeType : "image/png";
-
   const outBlob = await new Promise((resolve) => {
     canvas.toBlob((b) => resolve(b || blob), outType, outType === "image/jpeg" ? 0.95 : undefined);
   });
@@ -677,9 +702,15 @@ async function renderResult({ data, ms }) {
   const tag = timestampTag();
 
   const cropOn = lastCropConfig.enabled && Number.isFinite(lastCropConfig.ratio) && lastCropConfig.ratio > 0;
-  if (cropOn) {
-    setStatus("请求成功，正在按原图比例裁切输出……", true);
-  }
+  if (cropOn) setStatus("请求成功，正在按原图比例裁切输出……", true);
+
+  const extFromMime = (m) => {
+    if (!m) return "bin";
+    if (m.includes("png")) return "png";
+    if (m.includes("jpeg")) return "jpg";
+    if (m.includes("webp")) return "webp";
+    return "bin";
+  };
 
   for (let idx = 0; idx < images.length; idx++) {
     const img = images[idx];
@@ -698,20 +729,11 @@ async function renderResult({ data, ms }) {
         shownUrl = blobToObjectUrlTracked(cropped);
         shownLabel = "裁切输出";
       } catch {
-        // If crop fails, fallback to original
         shownBlob = origBlob;
         shownUrl = origUrl;
         shownLabel = "原始输出（裁切失败，已回退）";
       }
     }
-
-    const extFromMime = (m) => {
-      if (!m) return "bin";
-      if (m.includes("png")) return "png";
-      if (m.includes("jpeg")) return "jpg";
-      if (m.includes("webp")) return "webp";
-      return "bin";
-    };
 
     const ext = extFromMime(img.mimeType);
     const baseName = `gemini3_image_${tag}_${String(idx + 1).padStart(2, "0")}`;
@@ -759,7 +781,6 @@ async function renderResult({ data, ms }) {
 
     top.appendChild(left);
     top.appendChild(right);
-
     bar.appendChild(top);
 
     if (cropOn) {
@@ -786,16 +807,13 @@ async function renderResult({ data, ms }) {
 
     card.appendChild(imageEl);
     card.appendChild(bar);
-
     els.imagesOut.appendChild(card);
   }
 
-  if (cropOn) {
-    setStatus("", false);
-  }
+  if (cropOn) setStatus("", false);
 }
 
-// ----- persistence (base state, excluding presets content itself) -----
+// ----- persistence -----
 function persistBase() {
   localStorage.setItem(storageKeys.host, els.apiHost.value.trim());
   localStorage.setItem(storageKeys.rememberKey, String(els.rememberKey.checked));
@@ -898,7 +916,7 @@ function makePresetFromCurrentState() {
       imageSize: els.imageSize.value,
       temperature: els.temperature.value,
       topP: els.topP.value,
-      keepOriginalAspect: !!selectedImage && els.keepOriginalAspect.checked,
+      keepOriginalAspect: !!els.keepOriginalAspect.checked,
     },
     image: selectedImage ? {
       mimeType: selectedImage.mimeType,
@@ -914,7 +932,7 @@ function makePresetFromCurrentState() {
 
 function applyPreset(preset) {
   // DO NOT touch host/key
-  // Image first (affects keepOriginal availability)
+  // Apply image first (affects effective constraint)
   clearSelectedImage();
 
   if (preset.image?.base64) {
@@ -928,10 +946,11 @@ function applyPreset(preset) {
     const img = new Image();
     img.src = inputObjectUrl;
 
-    const finalize = async () => {
+    (async () => {
       try { await img.decode(); } catch {}
       const width = img.naturalWidth || preset.image.width || img.width;
       const height = img.naturalHeight || preset.image.height || img.height;
+
       selectedImage = {
         mimeType,
         base64,
@@ -943,13 +962,10 @@ function applyPreset(preset) {
         ratio: (width && height) ? width / height : null,
       };
       showSelectedImage(selectedImage);
-      enforceKeepOriginalAvailability();
-    };
-
-    finalize();
+      enforceKeepOriginalConstraints();
+    })();
   }
 
-  // Fields
   const f = preset.fields || {};
   els.systemPrompt.value = f.systemPrompt ?? "";
   els.prompt.value = f.prompt ?? "";
@@ -959,17 +975,12 @@ function applyPreset(preset) {
   els.topP.value = f.topP ?? "";
   els.keepOriginalAspect.checked = !!f.keepOriginalAspect;
 
-  // Mode
   setMode(preset.mode === "json" ? "json" : "form", { silent: true });
+  if (typeof preset.requestBodyJson === "string") els.requestBodyJson.value = preset.requestBodyJson;
 
-  if (typeof preset.requestBodyJson === "string") {
-    els.requestBodyJson.value = preset.requestBodyJson;
-  }
-
-  // Enforce constraints after everything applied
-  enforceKeepOriginalAvailability();
-
+  enforceKeepOriginalConstraints();
   persistBase();
+
   setStatus(`已应用预设：${preset.name}\n（Host / Key 未改变）`, true);
   setTimeout(() => setStatus("", false), 1400);
 }
@@ -1161,7 +1172,13 @@ async function doFetchOnce(req) {
 
 async function run() {
   persistBase();
-  setStatus("正在请求模型生成……", true);
+
+  // Optional informational message: checked but no image => not effective
+  if (els.keepOriginalAspect.checked && !selectedImage) {
+    setStatus("提示：你已勾选“保持原图比例”，但未上传图片，本次调用该选项不会生效。", true);
+  } else {
+    setStatus("正在请求模型生成……", true);
+  }
 
   els.resultEmpty.classList.add("hidden");
   els.result.classList.add("hidden");
@@ -1194,7 +1211,6 @@ async function run() {
           return;
         }
 
-        // Render (may async crop)
         setStatus("", false);
         await renderResult({ data, ms });
         return;
@@ -1231,7 +1247,10 @@ function resetNonFixedFields() {
   els.temperature.value = "";
   els.topP.value = "";
   els.requestBodyJson.value = "";
-  els.keepOriginalAspect.checked = false;
+
+  // IMPORTANT: per requirement, do not auto-uncheck keepOriginalAspect
+  // els.keepOriginalAspect.checked = false;
+
   clearSelectedImage();
 
   setStatus("", false);
@@ -1253,7 +1272,7 @@ async function handleImageFile(file) {
   selectedImage = info;
   showSelectedImage(info);
 
-  enforceKeepOriginalAvailability();
+  enforceKeepOriginalConstraints();
   persistBase();
 }
 
@@ -1272,10 +1291,12 @@ function wireEvents() {
     els.topP.addEventListener(evt, persistBase);
 
     els.requestBodyJson.addEventListener(evt, persistBase);
+
     els.keepOriginalAspect.addEventListener(evt, () => {
-      enforceKeepOriginalAvailability();
-      if (els.keepOriginalAspect.checked) {
-        setStatus("已开启“保持原图比例”：将自动选择最接近原图的生成比例，并在网页端裁切回原图比例；同时禁用 JSON 模式。", true);
+      enforceKeepOriginalConstraints();
+      const effective = els.keepOriginalAspect.checked && !!selectedImage;
+      if (effective) {
+        setStatus("已开启“保持原图比例”（且已上传图片）：将锁定比例为最接近原图，并在网页端裁切回原图比例；同时禁用 JSON 模式。", true);
         setTimeout(() => setStatus("", false), 1600);
       }
     });
@@ -1291,9 +1312,11 @@ function wireEvents() {
   });
 
   els.modeForm.addEventListener("click", () => setMode("form"));
+
   els.modeJson.addEventListener("click", () => {
-    if (els.keepOriginalAspect.checked && selectedImage) {
-      setStatus("已开启“保持原图比例”，JSON 模式不可用。", true);
+    const effective = els.keepOriginalAspect.checked && !!selectedImage;
+    if (effective) {
+      setStatus("已开启“保持原图比例”（且已上传图片），JSON 模式不可用。", true);
       return;
     }
     setMode("json");
@@ -1313,6 +1336,7 @@ function wireEvents() {
     e.stopPropagation();
     els.dropZone.style.borderColor = "rgba(255,255,255,0.2)";
   };
+
   els.dropZone.addEventListener("dragenter", onDrag);
   els.dropZone.addEventListener("dragover", onDrag);
   els.dropZone.addEventListener("dragleave", onLeave);
@@ -1393,8 +1417,8 @@ function init() {
 
   setMode(uiMode === "json" ? "json" : "form", { silent: true });
 
-  // No image at startup unless loaded via preset -> keepOriginal must be disabled
-  enforceKeepOriginalAvailability();
+  // Effective constraints depend on whether an image is currently loaded
+  enforceKeepOriginalConstraints();
 
   refreshPresetUI();
   const activeName = localStorage.getItem(storageKeys.activePreset) || "";
