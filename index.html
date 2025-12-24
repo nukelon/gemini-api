@@ -15,7 +15,7 @@
         <div class="title-left">
           <h1 class="title">Gemini 3 Pro Image Preview API 调用器</h1>
           <p class="subtitle">
-            Host / API Key / 系统提示词 / 提示词 / 输入图片（可选）/ 比例（可选）/ 分辨率（可选）/ temperature / topP / 预设 / JSON 请求体 / 原图比例裁切
+            Host / API Key / 系统提示词 / 提示词 / 输入图片（可选）/ 比例 / 分辨率 / temperature / topP / 预设 / JSON
           </p>
         </div>
 
@@ -55,14 +55,14 @@
             <div class="row">
               <label class="checkbox">
                 <input id="rememberKey" type="checkbox" />
-                <span>在本机保存 Key（localStorage）</span>
+                <span>在本机保存 Key</span>
               </label>
               <label class="checkbox">
                 <input id="useHeaderKey" type="checkbox" />
-                <span>把 Key 放到 Header（x-goog-api-key）</span>
+                <span>Key 放到 Header</span>
               </label>
             </div>
-            <span class="hint">GitHub Pages 为纯前端，无法真正隐藏 Key。建议做域名限制或使用服务端代理。</span>
+            <span class="hint">纯前端无法隐藏 Key；建议做域名限制或用服务端代理。</span>
           </label>
         </div>
 
@@ -75,12 +75,12 @@
           <div class="grid">
             <label class="field full">
               <span class="label">系统提示词（可选）</span>
-              <textarea id="systemPrompt" rows="3" placeholder="例如：你是一个专业平面设计师，输出图片需要干净背景、柔光、高清。"></textarea>
+              <textarea id="systemPrompt" rows="3"></textarea>
             </label>
 
             <label class="field full">
               <span class="label">提示词（必填）</span>
-              <textarea id="prompt" rows="5" placeholder="例如：生成一张极简风的咖啡品牌海报，包含清晰可读的标题文字“MOONBEAN”，风格高级。"></textarea>
+              <textarea id="prompt" rows="5"></textarea>
             </label>
 
             <div class="field full">
@@ -123,7 +123,7 @@
               <span class="label">保持原图比例</span>
               <label class="checkbox">
                 <input id="keepOriginalAspect" type="checkbox" />
-                <span>锁定比例设置与禁用 JSON；有图时：白边填充 + 裁切回原图比例</span>
+                <span>必要时加黑边对齐标准比例，并裁切回原图</span>
               </label>
             </div>
 
@@ -139,12 +139,12 @@
 
             <label class="field">
               <span class="label">Temperature（可选，0–2）</span>
-              <input id="temperature" type="number" inputmode="decimal" min="0" max="2" step="0.1" placeholder="留空使用模型默认" />
+              <input id="temperature" type="number" inputmode="decimal" min="0" max="2" step="0.1" />
             </label>
 
             <label class="field">
               <span class="label">TopP（可选，0–1）</span>
-              <input id="topP" type="number" inputmode="decimal" min="0" max="1" step="0.05" placeholder="留空使用模型默认" />
+              <input id="topP" type="number" inputmode="decimal" min="0" max="1" step="0.05" />
             </label>
           </div>
         </div>
@@ -158,8 +158,7 @@
 
           <label class="field full">
             <span class="label">请求体 JSON（将直接作为 POST body 发送）</span>
-            <textarea id="requestBodyJson" rows="16" spellcheck="false"
-              placeholder='例如：{"contents":[{"role":"user","parts":[{"text":"..."}]}],"generationConfig":{"responseModalities":["Image"]}}'></textarea>
+            <textarea id="requestBodyJson" rows="16" spellcheck="false"></textarea>
           </label>
         </div>
 
@@ -208,9 +207,7 @@
         <div id="imagesOutWrap" class="block hidden">
           <h3 class="block-title">图片输出</h3>
           <div id="imagesOut" class="gallery"></div>
-          <p class="hint">
-            iOS Safari 如遇“下载”不生效，请点击“打开”后长按图片保存到相册。
-          </p>
+          <p class="hint">iOS Safari 如遇“下载”不生效，请点击“打开”后长按图片保存。</p>
         </div>
 
         <details class="details">
@@ -221,9 +218,7 @@
     </section>
 
     <footer class="footer">
-      <p class="footnote">
-        说明：本页面仅做前端调用封装。建议对 API Key 做来源域名限制，或使用服务端代理。
-      </p>
+      <p class="footnote">说明：本页面仅做前端调用封装。</p>
     </footer>
   </main>
 
