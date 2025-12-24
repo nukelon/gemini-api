@@ -15,7 +15,7 @@
         <div class="title-left">
           <h1 class="title">Gemini 3 Pro Image Preview API 调用器</h1>
           <p class="subtitle">
-            支持：Host / API Key / 系统提示词 / 提示词 / 输入图片（可选）/ 比例（可选）/ 分辨率（可选）/ temperature / topP / 预设 / JSON 请求体 / 保持原图比例裁切
+            支持：Host / API Key / 系统提示词 / 提示词 / 输入图片（可选）/ 比例（可选）/ 分辨率（可选）/ temperature / topP / 预设 / JSON 请求体 / 保持原图比例裁切（有图才生效）
           </p>
         </div>
 
@@ -93,13 +93,6 @@
                 <input id="imageFile" type="file" accept="image/*" />
               </div>
 
-              <div class="row" style="margin-top:10px;">
-                <label class="checkbox">
-                  <input id="keepOriginalAspect" type="checkbox" disabled />
-                  <span>保持原图比例（自动裁切输出；将禁用 JSON 模式）</span>
-                </label>
-              </div>
-
               <div id="imagePreview" class="preview hidden">
                 <img id="imagePreviewImg" alt="输入图片预览" />
                 <div class="preview-meta">
@@ -108,9 +101,7 @@
                 </div>
               </div>
 
-              <span class="hint">
-                勾选“保持原图比例”后：模型会被要求尽量贴近原图宽高比；如不支持，则用纯黑补齐画幅外区域；网页将按原图宽高比裁切输出，并提供查看未经裁切的原始输出。
-              </span>
+              <span class="hint">上传图片后，可在提示词中写“保持主体不变的情况下……”等进行编辑或参考生成。</span>
             </div>
 
             <label class="field">
@@ -128,8 +119,18 @@
                 <option value="16:9">16:9</option>
                 <option value="21:9">21:9</option>
               </select>
-              <span class="hint">勾选“保持原图比例”后，这个选项会被锁定（由系统自动选择最接近的比例）。</span>
+              <span class="hint">当“保持原图比例”在“已上传图片”状态下生效时，此项将被锁定（自动选择最接近原图的比例）。</span>
             </label>
+
+            <!-- 新位置：放在比例下面 -->
+            <div class="field">
+              <span class="label">保持原图比例（仅在上传图片后生效）</span>
+              <label class="checkbox">
+                <input id="keepOriginalAspect" type="checkbox" />
+                <span>启用后：锁定比例为“最接近原图”，网页端裁切回原图比例，并提供查看原始输出；同时禁用 JSON 模式</span>
+              </label>
+              <span class="hint">未上传图片时：该选项不会生效（不会自动取消，也不会置灰）。</span>
+            </div>
 
             <label class="field">
               <span class="label">分辨率（可选）</span>
