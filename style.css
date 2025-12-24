@@ -83,8 +83,16 @@ body {
   font-size: 13px;
 }
 
-.filebtn { position: relative; overflow: hidden; }
-.filebtn input[type="file"] { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+.filebtn {
+  position: relative;
+  overflow: hidden;
+}
+.filebtn input[type="file"] {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: pointer;
+}
 
 .card {
   margin: 18px 0;
@@ -179,8 +187,10 @@ input:focus, select:focus, textarea:focus {
   cursor: pointer;
   font-size: 13px;
 }
-.seg.active { color: var(--text); background: rgba(140, 160, 255, 0.14); }
-.seg:disabled { opacity: 0.55; cursor: not-allowed; }
+.seg.active {
+  color: var(--text);
+  background: rgba(140, 160, 255, 0.14);
+}
 
 .jsonbar {
   display: flex;
@@ -206,11 +216,21 @@ input:focus, select:focus, textarea:focus {
   box-shadow: 0 0 0 3px rgba(140, 160, 255, 0.12);
 }
 
-.dropzone .dz-main { display: grid; gap: 4px; color: var(--muted); }
+.dropzone .dz-main {
+  display: grid;
+  gap: 4px;
+  color: var(--muted);
+}
+
 .dropzone strong { color: var(--text); font-size: 13px; }
 .dropzone span { font-size: 12px; }
 
-.dropzone input[type="file"] { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+.dropzone input[type="file"] {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: pointer;
+}
 
 .preview {
   margin-top: 10px;
@@ -232,7 +252,10 @@ input:focus, select:focus, textarea:focus {
   border: 1px solid var(--border2);
 }
 
-.preview-meta { display: grid; gap: 10px; }
+.preview-meta {
+  display: grid;
+  gap: 10px;
+}
 
 .actions {
   display: flex;
@@ -258,7 +281,15 @@ input:focus, select:focus, textarea:focus {
   background: rgba(140, 160, 255, 0.12);
 }
 
-.btn:disabled { opacity: 0.55; cursor: not-allowed; }
+.btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.btn.secondary:hover,
+.btn.primary:hover {
+  filter: brightness(1.1);
+}
 
 .status {
   margin-top: 10px;
@@ -272,7 +303,11 @@ input:focus, select:focus, textarea:focus {
   white-space: pre-wrap;
 }
 
-.empty { color: var(--muted); font-size: 13px; padding: 10px 0 2px; }
+.empty {
+  color: var(--muted);
+  font-size: 13px;
+  padding: 10px 0 2px;
+}
 
 .result-head {
   display: flex;
@@ -285,7 +320,12 @@ input:focus, select:focus, textarea:focus {
   border-bottom: 1px solid var(--border2);
 }
 
-.kpi { display: flex; gap: 10px; align-items: baseline; margin: 4px 0; }
+.kpi {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  margin: 4px 0;
+}
 .kpi-label { color: var(--muted); font-size: 12px; }
 .kpi-value { font-size: 13px; }
 
@@ -320,26 +360,19 @@ input:focus, select:focus, textarea:focus {
   display: grid;
 }
 
-.imgcard img { width: 100%; height: auto; display: block; }
+.imgcard img {
+  width: 100%;
+  height: auto;
+  display: block;
+}
 
-.imgcard .bar { display: grid; gap: 8px; padding: 10px; }
-
-.imgcard .barTop {
+.imgcard .bar {
   display: flex;
   justify-content: space-between;
   align-items: center;
   gap: 10px;
+  padding: 10px;
   flex-wrap: wrap;
-}
-
-.imgcard .barBottom {
-  display: flex;
-  justify-content: flex-end;
-  align-items: center;
-  gap: 12px;
-  flex-wrap: wrap;
-  border-top: 1px solid rgba(255,255,255,0.06);
-  padding-top: 8px;
 }
 
 .link {
@@ -349,10 +382,18 @@ input:focus, select:focus, textarea:focus {
 }
 .link:hover { text-decoration: underline; }
 
-.smallMuted { color: rgba(233,237,245,0.72); font-size: 12px; }
+.details {
+  margin-top: 14px;
+  border-top: 1px solid var(--border2);
+  padding-top: 12px;
+}
 
-.details { margin-top: 14px; border-top: 1px solid var(--border2); padding-top: 12px; }
-.details summary { cursor: pointer; color: var(--muted); font-size: 13px; user-select: none; }
+.details summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 13px;
+  user-select: none;
+}
 
 .footer { padding: 10px 0 24px; color: var(--muted); }
 .footnote { margin: 0; font-size: 12px; line-height: 1.5; }
