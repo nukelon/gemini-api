@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <title>Gemini 3 Pro Image Preview API 调用器</title>
-  <meta name="description" content="基于 GitHub Pages 的 gemini-3-pro-image-preview 图像生成/编辑 API 调用器" />
+  <meta name="description" content="基于 GitHub Pages 的 Gemini 3 调用器：图像生成/编辑 + 图片反推提示词" />
   <link rel="stylesheet" href="./style.css" />
 </head>
 
@@ -13,14 +13,14 @@
     <div class="container">
       <div class="title-row">
         <div class="title-left">
-          <h1 class="title">Gemini 3 Pro Image Preview API 调用器</h1>
+          <h1 class="title">Gemini 3 调用器（图像生成 + 反推提示词）</h1>
           <p class="subtitle">
-            支持：Host / API Key / 系统提示词 / 提示词（可空）/ 多图输入（可选）/ 比例（可选）/ 分辨率（可选）/ temperature / topP / 预设 / JSON 请求体
+            支持：Host / API Key / 系统提示词 / 提示词（可空）/ 多图输入 / 生成参数（仅图像模式）/ 预设 / JSON 请求体 / 特殊模式：反推提示词（gemini-3-pro-preview）
           </p>
         </div>
 
         <div class="presetbar" aria-label="预设工具栏">
-          <select id="presetSelect" class="presetSelect" title="选择预设">
+          <select id="presetSelect" class="presetSelect" title="选择预设/模式">
             <option value="">（无预设）</option>
           </select>
           <button id="presetSave" type="button" class="btn secondary">保存为预设</button>
@@ -46,7 +46,7 @@
           <label class="field">
             <span class="label">API 主机地址（可选）</span>
             <input id="apiHost" type="text" inputmode="url" placeholder="留空则使用 Google 官方主机" />
-            <span class="hint">可填入你的反代/网关域名；留空默认官方。</span>
+            <span class="hint">可填你的反代/网关域名；留空默认官方。</span>
           </label>
 
           <label class="field">
@@ -62,7 +62,7 @@
                 <span>把 Key 放到 Header（x-goog-api-key）</span>
               </label>
             </div>
-            <span class="hint">安全建议：对 Key 做来源域名限制。GitHub Pages 为纯前端，无法真正隐藏 Key。</span>
+            <span class="hint">GitHub Pages 为纯前端，无法真正隐藏 Key；建议做来源域名限制或使用服务端中转。</span>
           </label>
         </div>
 
@@ -75,17 +75,32 @@
           <div class="grid">
             <label class="field full">
               <span class="label">系统提示词（可选）</span>
-              <textarea id="systemPrompt" rows="3" placeholder="例如：你是一个专业平面设计师，输出图片需要干净背景、柔光、高清。"></textarea>
+              <textarea id="systemPrompt" rows="3" placeholder="例如：你是一个专业平面设计师…… / 或对反推输出的格式要求……"></textarea>
             </label>
 
             <label class="field full">
               <span class="label">提示词（可选）</span>
-              <textarea id="prompt" rows="5" placeholder="可留空：将传入空文本。若上传图片，可仅通过系统提示词/图片进行编辑。"></textarea>
+              <textarea id="prompt" rows="5" placeholder="可留空：将传入空文本。反推模式下可写补充要求，如“更偏电影感”“尽量保留logo”等。"></textarea>
               <span class="hint">若留空，将仍发送一个空文本 part（{ "text": "" }）。</span>
             </label>
 
+            <!-- 反推模式专用 -->
+            <label class="field full describeOnly hidden" id="describeTargetWrap">
+              <span class="label">反推提示词选项（仅在“反推提示词模式”启用）</span>
+              <select id="describeTarget">
+                <option value="full">全图（主体 + 动作 + 背景 + 风格/画风）</option>
+                <option value="background">仅背景（环境/场景/光照/材质/氛围）</option>
+                <option value="person">仅人物（外观/服饰/姿态/表情/动作）</option>
+                <option value="style">仅风格（风格体系 + 关键词簇 + 可迁移风格模板）</option>
+                <option value="rendering">仅画风（渲染/笔触/线稿/材质/颗粒/镜头质感等极细节）</option>
+              </select>
+              <span class="hint">
+                反推模式会调用 gemini-3-pro-preview，要求至少上传 1 张图片；输出会给出可直接用于 gemini-3-pro-image-preview 的超详细“格式化提示词”。
+              </span>
+            </label>
+
             <div class="field full">
-              <span class="label">输入图片（可选，支持多张）</span>
+              <span class="label">输入图片（可选；反推模式必选；支持多张）</span>
               <div id="dropZone" class="dropzone" role="button" tabindex="0">
                 <div class="dz-main">
                   <strong>拖拽图片到这里</strong>
@@ -107,8 +122,9 @@
               <span class="hint">会按选择顺序将多张图片追加为多个 inline_data parts 发送。</span>
             </div>
 
-            <label class="field">
-              <span class="label">生成图片比例（可选）</span>
+            <!-- 图像生成专用参数（反推模式会隐藏） -->
+            <label class="field genOnly">
+              <span class="label">生成图片比例（可选，仅图像模式）</span>
               <select id="aspectRatio">
                 <option value="">默认（模型自行选择）</option>
                 <option value="1:1">1:1</option>
@@ -124,8 +140,8 @@
               </select>
             </label>
 
-            <label class="field">
-              <span class="label">分辨率（可选）</span>
+            <label class="field genOnly">
+              <span class="label">分辨率（可选，仅图像模式）</span>
               <select id="imageSize">
                 <option value="">默认（1K）</option>
                 <option value="1K">1K</option>
@@ -135,13 +151,13 @@
               <span class="hint">4K 成本更高、延迟更大。</span>
             </label>
 
-            <label class="field">
-              <span class="label">Temperature（可选，0–2）</span>
+            <label class="field genOnly">
+              <span class="label">Temperature（可选，仅图像模式，0–2）</span>
               <input id="temperature" type="number" inputmode="decimal" min="0" max="2" step="0.1" placeholder="留空使用模型默认" />
             </label>
 
-            <label class="field">
-              <span class="label">TopP（可选，0–1）</span>
+            <label class="field genOnly">
+              <span class="label">TopP（可选，仅图像模式，0–1）</span>
               <input id="topP" type="number" inputmode="decimal" min="0" max="1" step="0.05" placeholder="留空使用模型默认" />
             </label>
           </div>
@@ -157,7 +173,7 @@
           <label class="field full">
             <span class="label">请求体 JSON（将直接作为 POST body 发送）</span>
             <textarea id="requestBodyJson" rows="16" spellcheck="false"
-              placeholder='例如：{"contents":[{"role":"user","parts":[{"text":""}]}],"generationConfig":{"responseModalities":["Image"]}}'></textarea>
+              placeholder='例如：{"contents":[{"role":"user","parts":[{"text":""}]}]}'></textarea>
             <span class="hint">提示：Host / Key 不在此 JSON 中；仍由上方固定配置决定。</span>
           </label>
         </div>
