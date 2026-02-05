@@ -1,8 +1,19 @@
-const MODEL_ID = "gemini-3-pro-image-preview";
-const DEFAULT_HOST = "https://generativelanguage.googleapis.com";
-const API_PATH = `/v1beta/models/${MODEL_ID}:generateContent`;
+// ====================== Models / Modes ======================
+const TASK_GENERATE = "generate";   // gemini-3-pro-image-preview
+const TASK_DESCRIBE = "describe";   // gemini-3-pro-preview (image->prompt)
 
-// ---------- utils ----------
+const MODELS = {
+  [TASK_GENERATE]: "gemini-3-pro-image-preview",
+  [TASK_DESCRIBE]: "gemini-3-pro-preview",
+};
+
+const SPECIAL_PRESET_ID = "__SPECIAL_IMAGE_TO_PROMPT__";
+const SPECIAL_PRESET_LABEL = "✨ 反推提示词（gemini-3-pro-preview · 不可删除）";
+
+const DEFAULT_HOST = "https://generativelanguage.googleapis.com";
+const apiPathFor = (modelId) => `/v1beta/models/${modelId}:generateContent`;
+
+// ====================== utils ======================
 const $id = (id) => document.getElementById(id);
 const $qs = (sel) => document.querySelector(sel);
 
@@ -50,9 +61,9 @@ function isLikelyNetworkError(err) {
   return false;
 }
 
-// ---------- DOM (with fallbacks to avoid silent break -> refresh/upload bugs) ----------
+// ====================== DOM (with fallbacks) ======================
 const els = {
-  form: $id("form") || $id("form") || $qs("form"),
+  form: $id("form") || $qs("form"),
 
   apiHost: $id("apiHost"),
   apiKey: $id("apiKey"),
@@ -67,6 +78,11 @@ const els = {
   systemPrompt: $id("systemPrompt"),
   prompt: $id("prompt"),
 
+  // describe-only
+  describeTargetWrap: $id("describeTargetWrap"),
+  describeTarget: $id("describeTarget"),
+
+  // multi-image
   imageFile: $id("imageFile"),
   dropZone: $id("dropZone"),
   imagesPreview: $id("imagesPreview"),
@@ -74,16 +90,19 @@ const els = {
   imagesPreviewGrid: $id("imagesPreviewGrid"),
   clearImages: $id("clearImages"),
 
+  // generate-only
   aspectRatio: $id("aspectRatio"),
   imageSize: $id("imageSize"),
   temperature: $id("temperature"),
   topP: $id("topP"),
 
+  // json editor
   requestBodyJson: $id("requestBodyJson"),
   jsonFormat: $id("jsonFormat"),
   jsonFromForm: $id("jsonFromForm"),
   jsonToForm: $id("jsonToForm"),
 
+  // presets
   presetSelect: $id("presetSelect"),
   presetSave: $id("presetSave"),
   presetUpdate: $id("presetUpdate"),
@@ -91,10 +110,12 @@ const els = {
   presetExport: $id("presetExport"),
   presetImport: $id("presetImport"),
 
+  // actions
   runBtn: $id("runBtn"),
   resetBtn: $id("resetBtn"),
   status: $id("status"),
 
+  // result
   resultEmpty: $id("resultEmpty"),
   result: $id("result"),
   modelName: $id("modelName"),
@@ -108,7 +129,7 @@ const els = {
   rawJson: $id("rawJson"),
 };
 
-// ---------- storage keys (保持旧 key，不改名；只新增 g3_prompt) ----------
+// ====================== storage keys (不改旧 key；只新增少量) ======================
 const storageKeys = {
   host: "g3_host",
   rememberKey: "g3_remember_key",
@@ -119,52 +140,54 @@ const storageKeys = {
   requestBodyJson: "g3_request_body_json",
 
   systemPrompt: "g3_system_prompt",
-  prompt: "g3_prompt", // NEW: 只新增，不会影响旧存储
+  prompt: "g3_prompt", // 你前一版已引入
   aspectRatio: "g3_aspect_ratio",
   imageSize: "g3_image_size",
   temperature: "g3_temperature",
   topP: "g3_topP",
 
+  // NEW
+  taskMode: "g3_task_mode",
+  describeTarget: "g3_describe_target",
+
   presets: "g3_presets_v1",
   activePreset: "g3_active_preset_name",
 };
 
-// ---------- state ----------
-let uiMode = "form"; // "form" | "json"
-let selectedImages = []; // [{ mimeType, base64, size, name, dataUrl }]
-let lastRequest = null;  // { url, headers, body }
-let outputObjectUrls = []; // blob URLs for output images
+// ====================== state ======================
+let uiMode = "form";               // "form" | "json"
+let taskMode = TASK_GENERATE;      // generate | describe
+let selectedImages = [];           // [{ mimeType, base64, size, name, dataUrl }]
+let lastRequest = null;            // { url, headers, body, modelId }
+let outputObjectUrls = [];         // blob URLs for output images
 
-// iOS background mitigation (best-effort retained)
+// iOS background mitigation
 let requestInFlight = false;
 let hiddenDuringRequest = false;
 let wakeLock = null;
 
-// ---------- status ----------
+// ====================== status ======================
 function setStatus(msg, visible = true) {
   if (!els.status) return;
   els.status.textContent = msg || "";
   els.status.classList.toggle("hidden", !visible);
 }
 
-// ---------- wake lock (best-effort) ----------
+// ====================== wake lock (best-effort) ======================
 async function requestWakeLock() {
   try {
     if (!("wakeLock" in navigator)) return;
     if (wakeLock) return;
     wakeLock = await navigator.wakeLock.request("screen");
     wakeLock.addEventListener("release", () => { wakeLock = null; });
-  } catch {
-    // ignore
-  }
+  } catch { /* ignore */ }
 }
-
 function releaseWakeLock() {
   try { wakeLock?.release?.(); } catch {}
   wakeLock = null;
 }
 
-// ---------- images (multi) ----------
+// ====================== images (multi) ======================
 async function readImageFile(file) {
   const mimeType = file.type || "application/octet-stream";
   const size = file.size;
@@ -250,15 +273,10 @@ async function handleImageFiles(fileList) {
   const files = Array.from(fileList || []).filter(f => (f?.type || "").startsWith("image/") || !f?.type);
   if (!files.length) return;
 
-  // 软限制提示
   const big = files.find(f => f.size > 12 * 1024 * 1024);
-  if (big) {
-    setStatus(`检测到较大图片（${big.name} · ${humanBytes(big.size)}）。移动端可能较慢，且 JSON/请求体也更大。`, true);
-  } else {
-    setStatus("", false);
-  }
+  if (big) setStatus(`检测到较大图片（${big.name} · ${humanBytes(big.size)}）。移动端可能较慢。`, true);
 
-  // 追加（不覆盖）：符合“多张”直觉；如需覆盖可先清空
+  // 追加模式（不覆盖）
   for (const f of files) {
     const info = await readImageFile(f);
     selectedImages.push(info);
@@ -268,12 +286,11 @@ async function handleImageFiles(fileList) {
   persistBase();
 }
 
-// ---------- output images ----------
+// ====================== output images ======================
 function cleanupOutputObjectUrls() {
   for (const u of outputObjectUrls) URL.revokeObjectURL(u);
   outputObjectUrls = [];
 }
-
 function b64ToBlobUrl(b64, mimeType) {
   const binary = atob(b64);
   const len = binary.length;
@@ -285,7 +302,7 @@ function b64ToBlobUrl(b64, mimeType) {
   return { url, blob };
 }
 
-// ---------- persistence (base; presets 不包含图片) ----------
+// ====================== persistence ======================
 function persistBase() {
   try {
     localStorage.setItem(storageKeys.host, els.apiHost?.value?.trim?.() || "");
@@ -302,14 +319,16 @@ function persistBase() {
     localStorage.setItem(storageKeys.temperature, els.temperature?.value || "");
     localStorage.setItem(storageKeys.topP, els.topP?.value || "");
 
+    // NEW
+    localStorage.setItem(storageKeys.taskMode, taskMode);
+    localStorage.setItem(storageKeys.describeTarget, els.describeTarget?.value || "full");
+
     if (els.rememberKey?.checked) {
       localStorage.setItem(storageKeys.apiKey, els.apiKey?.value || "");
     } else {
       localStorage.removeItem(storageKeys.apiKey);
     }
-  } catch {
-    // ignore
-  }
+  } catch { /* ignore */ }
 }
 
 function restoreBase() {
@@ -328,15 +347,17 @@ function restoreBase() {
     if (els.temperature) els.temperature.value = localStorage.getItem(storageKeys.temperature) || "";
     if (els.topP) els.topP.value = localStorage.getItem(storageKeys.topP) || "";
 
+    // NEW
+    taskMode = (localStorage.getItem(storageKeys.taskMode) || TASK_GENERATE);
+    if (els.describeTarget) els.describeTarget.value = localStorage.getItem(storageKeys.describeTarget) || "full";
+
     const savedKey = localStorage.getItem(storageKeys.apiKey) || "";
     if (els.rememberKey?.checked && savedKey && els.apiKey) els.apiKey.value = savedKey;
-  } catch {
-    // ignore
-  }
+  } catch { /* ignore */ }
 }
 
-// ---------- mode switching ----------
-function setMode(mode) {
+// ====================== UI mode switching ======================
+function setUiMode(mode) {
   uiMode = mode === "json" ? "json" : "form";
 
   if (els.modeForm) {
@@ -351,7 +372,6 @@ function setMode(mode) {
   if (els.formModeWrap) els.formModeWrap.classList.toggle("hidden", uiMode !== "form");
   if (els.jsonModeWrap) els.jsonModeWrap.classList.toggle("hidden", uiMode !== "json");
 
-  // 进入 JSON 模式：尝试从表单生成（不再因 prompt 为空而失败）
   if (uiMode === "json" && els.requestBodyJson) {
     try {
       const body = buildBodyFromForm();
@@ -360,6 +380,30 @@ function setMode(mode) {
     } catch (e) {
       setStatus(`切换到 JSON 模式：无法从表单生成默认 JSON（${e?.message || e}）。你可以直接编辑 JSON。`, true);
     }
+  }
+
+  persistBase();
+}
+
+function setTaskMode(mode) {
+  taskMode = (mode === TASK_DESCRIBE) ? TASK_DESCRIBE : TASK_GENERATE;
+
+  // toggle describe-only fields
+  document.querySelectorAll(".describeOnly").forEach(el => {
+    el.classList.toggle("hidden", taskMode !== TASK_DESCRIBE);
+  });
+  // toggle generate-only fields
+  document.querySelectorAll(".genOnly").forEach(el => {
+    el.classList.toggle("hidden", taskMode !== TASK_GENERATE);
+  });
+
+  if (els.runBtn) {
+    els.runBtn.textContent = (taskMode === TASK_DESCRIBE) ? "反推提示词" : "调用 API 生成";
+  }
+
+  // 若进入反推模式且系统提示为空，给一个默认高质量“反推指令”
+  if (taskMode === TASK_DESCRIBE && els.systemPrompt && !els.systemPrompt.value.trim()) {
+    els.systemPrompt.value = DEFAULT_DESCRIBE_SYSTEM_PROMPT;
   }
 
   persistBase();
@@ -402,7 +446,7 @@ function applyJsonToFormBestEffort() {
   const sp = obj?.systemInstruction?.parts?.[0]?.text;
   if (typeof sp === "string" && els.systemPrompt) els.systemPrompt.value = sp;
 
-  // parts: text + multiple images
+  // parts: text + images
   const parts = obj?.contents?.[0]?.parts || [];
   let text = "";
   const inlines = [];
@@ -411,12 +455,11 @@ function applyJsonToFormBestEffort() {
     const cand = p?.inline_data || p?.inlineData;
     if (cand?.data) inlines.push(cand);
   }
-  if (els.prompt) els.prompt.value = text; // 可能为空
+  if (els.prompt) els.prompt.value = text; // 允许为空
 
-  // images: 用 JSON 替换当前选择（更符合“回填”语义）
+  // images: 回填会覆盖当前选择
   clearAllImages();
   if (inlines.length) {
-    // 这里不走 file input；直接以 base64 构建预览 blob
     for (const inline of inlines) {
       const mimeType = inline.mime_type || inline.mimeType || "application/octet-stream";
       const base64 = inline.data;
@@ -425,18 +468,12 @@ function applyJsonToFormBestEffort() {
       for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
       const blob = new Blob([bytes], { type: mimeType });
       const dataUrl = URL.createObjectURL(blob);
-      selectedImages.push({
-        mimeType,
-        base64,
-        size: blob.size,
-        name: "json_image",
-        dataUrl,
-      });
+      selectedImages.push({ mimeType, base64, size: blob.size, name: "json_image", dataUrl });
     }
     renderInputImages();
   }
 
-  // config
+  // generation config (仅图像模式字段)
   const gc = obj?.generationConfig || {};
   if (typeof gc.temperature === "number" && els.temperature) els.temperature.value = String(gc.temperature);
   if (typeof gc.topP === "number" && els.topP) els.topP.value = String(gc.topP);
@@ -450,28 +487,115 @@ function applyJsonToFormBestEffort() {
   persistBase();
 }
 
-// ---------- request building ----------
+// ====================== Describe Prompt Templates ======================
+const DEFAULT_DESCRIBE_SYSTEM_PROMPT =
+`你是“图像提示词反推（Image-to-Prompt）”专家与电影级美术指导。
+目标：根据用户输入图片，反推出可直接用于 gemini-3-pro-image-preview 生成/复刻的超详细提示词。
+要求：
+- 输出必须极其具体、细粒度、可执行，尤其“风格/画风”要用尽可能最详细的语言描述。
+- 必须给出结构化结果，包含：Prompt（中文）、Prompt（English）、Negative Prompt（可选）、Style/Rendering 细节清单、相机/镜头/构图、光照、色彩、材质、环境氛围等。
+- 只描述图片中能推断到的内容；如果不确定，用“可能/倾向于/类似于”表达，不要编造具体品牌或真实人物身份。
+- 重点是让另一个模型能复现“视觉效果”，不仅是物体名词。`;
+
+// 5种模式聚焦说明
+function focusHintFor(target) {
+  switch (target) {
+    case "background":
+      return "聚焦背景/环境：场景类型、空间结构、材质、光照、天气、氛围、细节陈设；弱化或忽略人物/主体。";
+    case "person":
+      return "聚焦人物/主体：外观、年龄段、体型、姿态、动作、表情、发型、服饰、配饰、肤色与纹理细节；背景仅做最低限度说明。";
+    case "style":
+      return "聚焦风格体系：艺术流派/时代感/审美取向、构图语言、色彩策略、光影风格、质感与媒介；给出可迁移“风格模板”，让任何主体都能套用。";
+    case "rendering":
+      return "聚焦画风/渲染：笔触、线稿、上色方式、阴影算法、边缘处理、颗粒/噪点、胶片/镜头瑕疵、纹理叠加、锐化与景深、HDR/对比曲线等极细节。";
+    case "full":
+    default:
+      return "全图完整复刻：主体+动作+背景+构图+镜头+光照+色彩+材质+风格/画风（必须极其详细）。";
+  }
+}
+
+function buildDescribeDirective() {
+  const target = els.describeTarget?.value || "full";
+  const userHint = (els.prompt?.value || "").trim();
+
+  return `
+你将收到 1~多张参考图片。请完成“反推提示词”任务，并严格按以下格式输出（Markdown）：
+
+## 1) Prompt（中文，给 gemini-3-pro-image-preview）
+- 输出为一段可直接复制使用的、超详细提示词（不要解释，不要加前缀）。
+- 必须包含：主体/动作/姿态、背景/场景、构图、镜头与摄影参数（如焦段、景深、机位）、光照、色彩、材质细节、氛围、风格/画风（极其详细）、画质与细节层级、需要避免的歧义。
+
+## 2) Prompt（English, for gemini-3-pro-image-preview）
+- 与中文 Prompt 等价，尽量使用行业常用术语，保证可复现风格与质感。
+
+## 3) Negative Prompt（可选）
+- 列出应避免的元素与常见瑕疵（例如：extra fingers, blurry, low-res, artifacts, watermark 等），但不要过度胡乱添加。
+
+## 4) Style / Rendering 细节清单（必须非常细）
+- 用项目符号列出：画风媒介（摄影/插画/3D/油画/赛璐璐等）、笔触/线条、纹理、颗粒、对比曲线、调色倾向、边缘与轮廓处理、光影模型、反射/折射、噪点与胶片感、后期风格等。
+
+## 5) Composition / Camera / Lighting
+- 分别描述：构图规则、主体在画面位置、镜头视角、景深、光源方向与软硬、色温、环境光、阴影特征。
+
+聚焦要求：${focusHintFor(target)}
+${userHint ? `用户补充要求：${userHint}` : "用户补充要求：无（可为空）。"}
+
+注意：
+- 你的输出目标是“让 gemini-3-pro-image-preview 能复刻视觉效果”，所以风格/画风请用尽可能最细、最具体的语言，不要只写“赛博朋克/写实/二次元”这种泛词。
+- 不要输出与任务无关的解释段落。`;
+}
+
+// ====================== request building ======================
 function buildBodyFromForm() {
   const systemPrompt = (els.systemPrompt?.value || "").trim();
-  const prompt = (els.prompt?.value || ""); // 允许空；不 trim 也可
-  const aspectRatio = els.aspectRatio?.value || "";
-  const imageSize = els.imageSize?.value || "";
-
-  const temperature = safeNumberOrEmpty(els.temperature?.value);
-  const topP = safeNumberOrEmpty(els.topP?.value);
-
-  // 注意：提示词允许为空，但仍需传入一个 text part
+  const prompt = (els.prompt?.value || ""); // 允许空
   const parts = [{ text: prompt }];
 
   // 多图：按顺序追加
   for (const img of selectedImages) {
     parts.push({
-      inline_data: {
-        mime_type: img.mimeType,
-        data: img.base64,
-      },
+      inline_data: { mime_type: img.mimeType, data: img.base64 },
     });
   }
+
+  if (taskMode === TASK_DESCRIBE) {
+    // 反推模式：文本模型 + 指令文本（把指令放到 user text 前面更稳）
+    if (selectedImages.length === 0) {
+      throw new Error("反推提示词模式要求至少上传 1 张图片。");
+    }
+
+    const directive = buildDescribeDirective();
+    const describeParts = [{ text: directive }];
+
+    for (const img of selectedImages) {
+      describeParts.push({
+        inline_data: { mime_type: img.mimeType, data: img.base64 },
+      });
+    }
+
+    // 仍允许用户 prompt 为空；用户补充要求已在 directive 中引用
+    const body = {
+      contents: [{
+        role: "user",
+        parts: describeParts,
+      }],
+    };
+
+    // systemInstruction：用户系统提示 + 默认反推系统提示
+    const combinedSystem = `${systemPrompt ? systemPrompt + "\n\n" : ""}${DEFAULT_DESCRIBE_SYSTEM_PROMPT}`;
+    if (combinedSystem.trim()) {
+      body.systemInstruction = { parts: [{ text: combinedSystem }] };
+    }
+
+    // 不强行设置 responseModalities（默认文本），避免兼容性问题
+    return body;
+  }
+
+  // 图像生成模式
+  const aspectRatio = els.aspectRatio?.value || "";
+  const imageSize = els.imageSize?.value || "";
+  const temperature = safeNumberOrEmpty(els.temperature?.value);
+  const topP = safeNumberOrEmpty(els.topP?.value);
 
   const body = {
     contents: [{
@@ -500,15 +624,18 @@ function buildBodyFromForm() {
 }
 
 function buildRequest() {
+  const modelId = MODELS[taskMode] || MODELS[TASK_GENERATE];
+
   const host = stripTrailingSlash((els.apiHost?.value || "").trim() || DEFAULT_HOST);
   const apiKey = (els.apiKey?.value || "").trim();
   const useHeaderKey = !!els.useHeaderKey?.checked;
 
   if (!apiKey) throw new Error("请填写 API Key。");
 
+  const path = apiPathFor(modelId);
   const url = useHeaderKey
-    ? `${host}${API_PATH}`
-    : `${host}${API_PATH}?key=${encodeURIComponent(apiKey)}`;
+    ? `${host}${path}`
+    : `${host}${path}?key=${encodeURIComponent(apiKey)}`;
 
   let body;
   if (uiMode === "json") {
@@ -523,7 +650,7 @@ function buildRequest() {
   const headers = { "Content-Type": "application/json" };
   if (useHeaderKey) headers["x-goog-api-key"] = apiKey;
 
-  return { url, headers, body };
+  return { url, headers, body, modelId };
 }
 
 function makeCurl({ url, headers, body }) {
@@ -539,12 +666,12 @@ function makeCurl({ url, headers, body }) {
   ].join("\n");
 }
 
-// ---------- render result ----------
-function renderResult({ data, ms }) {
+// ====================== render result ======================
+function renderResult({ data, ms, modelId }) {
   if (els.resultEmpty) els.resultEmpty.classList.add("hidden");
   if (els.result) els.result.classList.remove("hidden");
 
-  if (els.modelName) els.modelName.textContent = MODEL_ID;
+  if (els.modelName) els.modelName.textContent = modelId;
   if (els.latency) els.latency.textContent = `${ms.toFixed(0)} ms`;
   if (els.rawJson) els.rawJson.textContent = JSON.stringify(data, null, 2);
 
@@ -587,14 +714,14 @@ function renderResult({ data, ms }) {
           img.mimeType.includes("jpeg") ? "jpg" :
           img.mimeType.includes("webp") ? "webp" : "bin";
 
-        const filename = `gemini3_image_${tag}_${String(idx + 1).padStart(2, "0")}.${ext}`;
+        const filename = `gemini3_${modelId}_${tag}_${String(idx + 1).padStart(2, "0")}.${ext}`;
 
         const card = document.createElement("div");
         card.className = "imgcard";
 
         const imageEl = document.createElement("img");
         imageEl.src = url;
-        imageEl.alt = `生成图片 ${idx + 1}`;
+        imageEl.alt = `输出图片 ${idx + 1}`;
 
         const bar = document.createElement("div");
         bar.className = "bar";
@@ -640,7 +767,7 @@ function renderResult({ data, ms }) {
   }
 }
 
-// ---------- presets (不保存图片；并自动迁移旧预设移除 image 字段) ----------
+// ====================== presets (不保存图片；并加入不可删除特殊模式) ======================
 function loadPresets() {
   try {
     const raw = localStorage.getItem(storageKeys.presets);
@@ -648,7 +775,7 @@ function loadPresets() {
     const arr = JSON.parse(raw);
     if (!Array.isArray(arr)) return [];
 
-    // migration: strip legacy image fields to meet "预设不保存图片"
+    // migration: strip legacy image fields
     let changed = false;
     const normalized = arr.map(p => {
       if (p && typeof p === "object" && "image" in p) {
@@ -658,17 +785,13 @@ function loadPresets() {
       }
       return p;
     });
-
     if (changed) localStorage.setItem(storageKeys.presets, JSON.stringify(normalized));
     return normalized;
   } catch {
     return [];
   }
 }
-
-function savePresets(arr) {
-  localStorage.setItem(storageKeys.presets, JSON.stringify(arr));
-}
+function savePresets(arr) { localStorage.setItem(storageKeys.presets, JSON.stringify(arr)); }
 
 function refreshPresetUI() {
   const presets = loadPresets();
@@ -677,9 +800,23 @@ function refreshPresetUI() {
   if (!els.presetSelect) return;
 
   els.presetSelect.innerHTML = "";
+
+  // special mode option (always exists)
+  const special = document.createElement("option");
+  special.value = SPECIAL_PRESET_ID;
+  special.textContent = SPECIAL_PRESET_LABEL;
+  if (activeName === SPECIAL_PRESET_ID) special.selected = true;
+  els.presetSelect.appendChild(special);
+
+  const divider = document.createElement("option");
+  divider.disabled = true;
+  divider.textContent = "──────────";
+  els.presetSelect.appendChild(divider);
+
   const empty = document.createElement("option");
   empty.value = "";
-  empty.textContent = "（无预设）";
+  empty.textContent = "（无预设/回到默认）";
+  if (!activeName) empty.selected = true;
   els.presetSelect.appendChild(empty);
 
   for (const p of presets) {
@@ -691,9 +828,11 @@ function refreshPresetUI() {
     els.presetSelect.appendChild(opt);
   }
 
-  const hasActive = !!activeName && presets.some(p => p.name === activeName);
-  if (els.presetUpdate) els.presetUpdate.disabled = !hasActive;
-  if (els.presetDelete) els.presetDelete.disabled = !hasActive;
+  const isSpecial = activeName === SPECIAL_PRESET_ID;
+  const hasActiveRealPreset = !!activeName && !isSpecial && presets.some(p => p.name === activeName);
+
+  if (els.presetUpdate) els.presetUpdate.disabled = !hasActiveRealPreset;
+  if (els.presetDelete) els.presetDelete.disabled = !hasActiveRealPreset;
 }
 
 function getCurrentPresetName() {
@@ -701,12 +840,13 @@ function getCurrentPresetName() {
 }
 
 function makePresetFromCurrentState() {
-  // 注意：不包含图片
   return {
     name: "",
     createdAt: nowISO(),
     updatedAt: nowISO(),
-    mode: uiMode,
+    uiMode,
+    taskMode, // NEW: 保存任务类型（生成/反推）
+    describeTarget: els.describeTarget?.value || "full",
     fields: {
       systemPrompt: els.systemPrompt?.value || "",
       prompt: els.prompt?.value || "",
@@ -720,8 +860,11 @@ function makePresetFromCurrentState() {
 }
 
 function applyPreset(preset) {
-  // 不修改 Host/Key；也不修改当前已选图片（因为预设不保存图片）
-  setMode(preset.mode === "json" ? "json" : "form");
+  // 不修改 Host/Key；不修改当前已选图片（预设不保存图片）
+  setTaskMode(preset.taskMode === TASK_DESCRIBE ? TASK_DESCRIBE : TASK_GENERATE);
+  if (els.describeTarget && preset.describeTarget) els.describeTarget.value = preset.describeTarget;
+
+  setUiMode(preset.uiMode === "json" ? "json" : "form");
 
   const f = preset.fields || {};
   if (els.systemPrompt) els.systemPrompt.value = f.systemPrompt ?? "";
@@ -736,7 +879,7 @@ function applyPreset(preset) {
   }
 
   persistBase();
-  setStatus(`已应用预设：${preset.name}\n（Host / Key 不变；图片不随预设切换）`, true);
+  setStatus(`已应用预设：${preset.name}\n（Host/Key 不变；图片不随预设切换）`, true);
   setTimeout(() => setStatus("", false), 1300);
 }
 
@@ -770,7 +913,7 @@ function saveAsPreset() {
 
 function updateActivePreset() {
   const name = getCurrentPresetName();
-  if (!name) return;
+  if (!name || name === SPECIAL_PRESET_ID) return;
 
   const presets = loadPresets();
   const idx = presets.findIndex(p => p.name === name);
@@ -795,7 +938,7 @@ function updateActivePreset() {
 
 function deleteActivePreset() {
   const name = getCurrentPresetName();
-  if (!name) return;
+  if (!name || name === SPECIAL_PRESET_ID) return;
 
   const ok = confirm(`确认删除预设“${name}”？该操作不可撤销。`);
   if (!ok) return;
@@ -811,7 +954,7 @@ function deleteActivePreset() {
 
 function exportPresets() {
   const presets = loadPresets();
-  const payload = { version: 2, exportedAt: nowISO(), presets }; // version bump; still兼容导入
+  const payload = { version: 3, exportedAt: nowISO(), presets }; // v3: 包含 taskMode/describeTarget
   const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
   const url = URL.createObjectURL(blob);
 
@@ -858,12 +1001,14 @@ async function importPresetsFromFile(file) {
       name = `${name}（导入${i}）`;
     }
 
-    // 严格丢弃图片字段（若旧版本导出包含 image）
+    // 严格丢弃图片字段（旧版本可能含 image）
     const safePreset = {
       name,
       createdAt: p.createdAt || nowISO(),
       updatedAt: nowISO(),
-      mode: (p.mode === "json") ? "json" : "form",
+      uiMode: (p.uiMode === "json") ? "json" : "form",
+      taskMode: (p.taskMode === TASK_DESCRIBE) ? TASK_DESCRIBE : TASK_GENERATE,
+      describeTarget: (typeof p.describeTarget === "string" ? p.describeTarget : "full"),
       fields: {
         systemPrompt: p?.fields?.systemPrompt ?? "",
         prompt: p?.fields?.prompt ?? "",
@@ -888,7 +1033,7 @@ async function importPresetsFromFile(file) {
   setTimeout(() => setStatus("", false), 1400);
 }
 
-// ---------- run ----------
+// ====================== run ======================
 async function doFetchOnce(req) {
   const t0 = performance.now();
   const resp = await fetch(req.url, {
@@ -896,7 +1041,6 @@ async function doFetchOnce(req) {
     headers: req.headers,
     body: JSON.stringify(req.body),
   });
-
   const data = await resp.json().catch(() => ({}));
   const t1 = performance.now();
   return { resp, data, ms: (t1 - t0) };
@@ -904,7 +1048,7 @@ async function doFetchOnce(req) {
 
 async function run() {
   persistBase();
-  setStatus("正在请求模型生成……", true);
+  setStatus(taskMode === TASK_DESCRIBE ? "正在反推提示词……" : "正在请求模型生成……", true);
 
   if (els.resultEmpty) els.resultEmpty.classList.add("hidden");
   if (els.result) els.result.classList.add("hidden");
@@ -914,10 +1058,10 @@ async function run() {
   cleanupOutputObjectUrls();
 
   let req;
-  try {
-    req = buildRequest();
-  } catch (e) {
+  try { req = buildRequest(); }
+  catch (e) {
     setStatus(e?.message || String(e), true);
+    if (els.resultEmpty) els.resultEmpty.classList.remove("hidden");
     return;
   }
 
@@ -942,7 +1086,7 @@ async function run() {
         }
 
         setStatus("", false);
-        renderResult({ data, ms });
+        renderResult({ data, ms, modelId: req.modelId });
         return;
       } catch (e) {
         if (!didAutoRetry && hiddenDuringRequest && isLikelyNetworkError(e)) {
@@ -967,7 +1111,7 @@ async function run() {
   }
 }
 
-// ---------- reset ----------
+// ====================== reset ======================
 function resetNonFixedFields() {
   if (els.systemPrompt) els.systemPrompt.value = "";
   if (els.prompt) els.prompt.value = "";
@@ -976,7 +1120,12 @@ function resetNonFixedFields() {
   if (els.temperature) els.temperature.value = "";
   if (els.topP) els.topP.value = "";
   if (els.requestBodyJson) els.requestBodyJson.value = "";
+  if (els.describeTarget) els.describeTarget.value = "full";
   clearAllImages();
+
+  // reset to generate mode (but keep host/key)
+  setTaskMode(TASK_GENERATE);
+  setUiMode("form");
 
   setStatus("", false);
   if (els.result) els.result.classList.add("hidden");
@@ -984,14 +1133,13 @@ function resetNonFixedFields() {
   persistBase();
 }
 
-// ---------- wiring ----------
+// ====================== wiring ======================
 function wireEvents() {
   if (!els.form) {
     setStatus("初始化失败：未找到 form 元素。请确认 index.html 中 <form id=\"form\"> 存在。", true);
     return;
   }
 
-  // persist on change
   ["input", "change"].forEach((evt) => {
     els.apiHost?.addEventListener(evt, persistBase);
     els.apiKey?.addEventListener(evt, persistBase);
@@ -1000,10 +1148,14 @@ function wireEvents() {
 
     els.systemPrompt?.addEventListener(evt, persistBase);
     els.prompt?.addEventListener(evt, persistBase);
+
     els.aspectRatio?.addEventListener(evt, persistBase);
     els.imageSize?.addEventListener(evt, persistBase);
     els.temperature?.addEventListener(evt, persistBase);
     els.topP?.addEventListener(evt, persistBase);
+
+    els.describeTarget?.addEventListener(evt, persistBase);
+
     els.requestBodyJson?.addEventListener(evt, persistBase);
   });
 
@@ -1017,15 +1169,15 @@ function wireEvents() {
   });
 
   // mode switch
-  els.modeForm?.addEventListener("click", () => setMode("form"));
-  els.modeJson?.addEventListener("click", () => setMode("json"));
+  els.modeForm?.addEventListener("click", () => setUiMode("form"));
+  els.modeJson?.addEventListener("click", () => setUiMode("json"));
 
   // json tools
   els.jsonFormat?.addEventListener("click", formatJsonEditor);
   els.jsonFromForm?.addEventListener("click", syncJsonFromForm);
   els.jsonToForm?.addEventListener("click", applyJsonToFormBestEffort);
 
-  // multi-image: drag & drop
+  // drag&drop
   const onDrag = (e) => {
     e.preventDefault();
     e.stopPropagation();
@@ -1036,7 +1188,6 @@ function wireEvents() {
     e.stopPropagation();
     if (els.dropZone) els.dropZone.style.borderColor = "rgba(255,255,255,0.2)";
   };
-
   els.dropZone?.addEventListener("dragenter", onDrag);
   els.dropZone?.addEventListener("dragover", onDrag);
   els.dropZone?.addEventListener("dragleave", onLeave);
@@ -1049,7 +1200,6 @@ function wireEvents() {
   els.imageFile?.addEventListener("change", async () => {
     const files = els.imageFile.files;
     if (files?.length) await handleImageFiles(files);
-    // 不清空 input：允许同一批次追加/重复选择；需要覆盖可点“清空图片”
   });
 
   els.clearImages?.addEventListener("click", () => {
@@ -1057,7 +1207,7 @@ function wireEvents() {
     persistBase();
   });
 
-  // submit: 强制 preventDefault 防止刷新
+  // submit 防刷新
   els.form.addEventListener("submit", async (e) => {
     e.preventDefault();
     e.stopPropagation();
@@ -1083,17 +1233,29 @@ function wireEvents() {
     setTimeout(() => setStatus("", false), 1000);
   });
 
-  // presets
+  // presets selection includes special mode
   els.presetSelect?.addEventListener("change", () => {
-    const name = els.presetSelect.value || "";
-    if (!name) {
-      localStorage.removeItem(storageKeys.activePreset);
+    const value = els.presetSelect.value || "";
+
+    // persist selection
+    localStorage.setItem(storageKeys.activePreset, value);
+
+    if (value === SPECIAL_PRESET_ID) {
+      setTaskMode(TASK_DESCRIBE);
+      refreshPresetUI();
+      setStatus("已切换：反推提示词模式（不可删除）。\n请至少上传 1 张图片，然后点击“反推提示词”。", true);
+      setTimeout(() => setStatus("", false), 1600);
+      return;
+    }
+
+    if (!value) {
+      setTaskMode(TASK_GENERATE);
       refreshPresetUI();
       return;
     }
-    localStorage.setItem(storageKeys.activePreset, name);
+
     const presets = loadPresets();
-    const p = presets.find(x => x.name === name);
+    const p = presets.find(x => x.name === value);
     if (p) applyPreset(p);
     refreshPresetUI();
   });
@@ -1109,32 +1271,47 @@ function wireEvents() {
     await importPresetsFromFile(f);
   });
 
-  // iOS background detection
+  // iOS background
   document.addEventListener("visibilitychange", async () => {
     if (requestInFlight && document.visibilityState === "hidden") hiddenDuringRequest = true;
     if (requestInFlight && document.visibilityState === "visible") await requestWakeLock();
   });
 }
 
-// ---------- init ----------
+// ====================== init ======================
 function init() {
   restoreBase();
   wireEvents();
-  setMode(uiMode === "json" ? "json" : "form");
+
+  // apply modes
+  setTaskMode(taskMode);
+  setUiMode(uiMode);
+
   refreshPresetUI();
 
-  const activeName = localStorage.getItem(storageKeys.activePreset) || "";
-  if (activeName) {
+  // restore last selection (including special mode)
+  const active = localStorage.getItem(storageKeys.activePreset) || "";
+  if (els.presetSelect) {
+    // if it exists in options, select it; otherwise fallback
+    const has = Array.from(els.presetSelect.options).some(o => o.value === active);
+    if (has) els.presetSelect.value = active;
+  }
+
+  // apply selection effects
+  if (active === SPECIAL_PRESET_ID) {
+    setTaskMode(TASK_DESCRIBE);
+  } else if (!active) {
+    setTaskMode(taskMode); // keep restored
+  } else {
     const presets = loadPresets();
-    const p = presets.find(x => x.name === activeName);
+    const p = presets.find(x => x.name === active);
     if (p) applyPreset(p);
   }
 
-  // 初始渲染输入图片（默认无）
   renderInputImages();
 }
 
-// 用 try/catch 防止脚本异常导致“事件未绑定 -> 表单刷新/上传失效/参数丢失”的连锁回归
+// 防止初始化异常导致“事件未绑定 -> 刷新/上传失效/参数丢失”
 try {
   init();
 } catch (e) {
