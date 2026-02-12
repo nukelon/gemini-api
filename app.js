@@ -67,7 +67,7 @@ const els = {
   tabDesc: $id("tabDesc"),
   paneGen: $id("paneGen"),
   paneDesc: $id("paneDesc"),
-  presetbarGen: $id("presetbarGen"),
+  presetbar: $id("presetbar"),
 
   // shared images
   imageFile: $id("imageFile"),
@@ -82,6 +82,12 @@ const els = {
   modeJson: $id("modeJson"),
   formModeWrap: $id("formModeWrap"),
   jsonModeWrap: $id("jsonModeWrap"),
+
+  // describe mode: json/form switch
+  descModeForm: $id("descModeForm"),
+  descModeJson: $id("descModeJson"),
+  descFormModeWrap: $id("descFormModeWrap"),
+  descJsonModeWrap: $id("descJsonModeWrap"),
 
   systemPrompt: $id("systemPrompt"),
   prompt: $id("prompt"),
@@ -107,6 +113,13 @@ const els = {
   descPreset: $id("descPreset"),
   descPrompt: $id("descPrompt"),
   descSystemPrompt: $id("descSystemPrompt"),
+  descTemperature: $id("descTemperature"),
+  descMediaResolution: $id("descMediaResolution"),
+  descThinkingLevel: $id("descThinkingLevel"),
+  descRequestBodyJson: $id("descRequestBodyJson"),
+  descJsonFormat: $id("descJsonFormat"),
+  descJsonFromForm: $id("descJsonFromForm"),
+  descJsonToForm: $id("descJsonToForm"),
 
   // actions
   runBtn: $id("runBtn"),
@@ -139,6 +152,10 @@ const storageKeys = {
   uiMode: "g3_ui_mode",
   requestBodyJson: "g3_request_body_json",
 
+  // desc ui mode/json body
+  descUiMode: "g3_desc_ui_mode",
+  descRequestBodyJson: "g3_desc_request_body_json",
+
   // gen fields
   systemPrompt: "g3_system_prompt",
   prompt: "g3_prompt",
@@ -147,9 +164,11 @@ const storageKeys = {
   temperature: "g3_temperature",
   topP: "g3_topP",
 
-  // gen presets
-  presets: "g3_presets_v1",
-  activePreset: "g3_active_preset_name",
+  // presets
+  genPresets: "g3_gen_presets_v2",
+  descPresets: "g3_desc_presets_v1",
+  activeGenPreset: "g3_active_gen_preset_name",
+  activeDescPreset: "g3_active_desc_preset_name",
 
   // NEW: tabs
   activeTab: "g3_active_tab", // "gen" | "desc"
@@ -158,11 +177,15 @@ const storageKeys = {
   descPresetId: "g3_desc_preset_id",      // full/background/person/style
   descPrompt: "g3_desc_prompt",
   descSystemPrompt: "g3_desc_system_prompt",
+  descTemperature: "g3_desc_temperature",
+  descMediaResolution: "g3_desc_media_resolution",
+  descThinkingLevel: "g3_desc_thinking_level",
 };
 
 // ====================== state ======================
 let activeTab = "gen"; // "gen" | "desc"
-let uiMode = "form";   // for generate tab only: "form" | "json"
+let uiMode = "form";   // generate: "form" | "json"
+let descUiMode = "form"; // describe: "form" | "json"
 let selectedImages = []; // [{ mimeType, base64, size, name, dataUrl }]
 
 let lastRequest = null;  // { url, headers, body, modelId }
@@ -322,6 +345,10 @@ function persistBase() {
     localStorage.setItem(storageKeys.uiMode, uiMode);
     localStorage.setItem(storageKeys.requestBodyJson, els.requestBodyJson?.value || "");
 
+    // describe UI mode + json body
+    localStorage.setItem(storageKeys.descUiMode, descUiMode);
+    localStorage.setItem(storageKeys.descRequestBodyJson, els.descRequestBodyJson?.value || "");
+
     // generate fields
     localStorage.setItem(storageKeys.systemPrompt, els.systemPrompt?.value || "");
     localStorage.setItem(storageKeys.prompt, els.prompt?.value || "");
@@ -334,6 +361,9 @@ function persistBase() {
     localStorage.setItem(storageKeys.descPresetId, els.descPreset?.value || "full");
     localStorage.setItem(storageKeys.descPrompt, els.descPrompt?.value || "");
     localStorage.setItem(storageKeys.descSystemPrompt, els.descSystemPrompt?.value || "");
+    localStorage.setItem(storageKeys.descTemperature, els.descTemperature?.value || "");
+    localStorage.setItem(storageKeys.descMediaResolution, els.descMediaResolution?.value || "");
+    localStorage.setItem(storageKeys.descThinkingLevel, els.descThinkingLevel?.value || "");
 
     if (els.rememberKey?.checked) {
       localStorage.setItem(storageKeys.apiKey, els.apiKey?.value || "");
@@ -354,6 +384,9 @@ function restoreBase() {
     uiMode = localStorage.getItem(storageKeys.uiMode) || "form";
     if (els.requestBodyJson) els.requestBodyJson.value = localStorage.getItem(storageKeys.requestBodyJson) || "";
 
+    descUiMode = localStorage.getItem(storageKeys.descUiMode) || "form";
+    if (els.descRequestBodyJson) els.descRequestBodyJson.value = localStorage.getItem(storageKeys.descRequestBodyJson) || "";
+
     if (els.systemPrompt) els.systemPrompt.value = localStorage.getItem(storageKeys.systemPrompt) || "";
     if (els.prompt) els.prompt.value = localStorage.getItem(storageKeys.prompt) || "";
     if (els.aspectRatio) els.aspectRatio.value = localStorage.getItem(storageKeys.aspectRatio) || "";
@@ -364,6 +397,9 @@ function restoreBase() {
     if (els.descPreset) els.descPreset.value = localStorage.getItem(storageKeys.descPresetId) || "full";
     if (els.descPrompt) els.descPrompt.value = localStorage.getItem(storageKeys.descPrompt) || "";
     if (els.descSystemPrompt) els.descSystemPrompt.value = localStorage.getItem(storageKeys.descSystemPrompt) || "";
+    if (els.descTemperature) els.descTemperature.value = localStorage.getItem(storageKeys.descTemperature) || "";
+    if (els.descMediaResolution) els.descMediaResolution.value = localStorage.getItem(storageKeys.descMediaResolution) || "";
+    if (els.descThinkingLevel) els.descThinkingLevel.value = localStorage.getItem(storageKeys.descThinkingLevel) || "";
 
     const savedKey = localStorage.getItem(storageKeys.apiKey) || "";
     if (els.rememberKey?.checked && savedKey && els.apiKey) els.apiKey.value = savedKey;
@@ -386,15 +422,15 @@ function setActiveTab(tab) {
   if (els.paneGen) els.paneGen.classList.toggle("hidden", activeTab !== "gen");
   if (els.paneDesc) els.paneDesc.classList.toggle("hidden", activeTab !== "desc");
 
-  // header preset bar only for generate tab
-  if (els.presetbarGen) els.presetbarGen.classList.toggle("hidden", activeTab !== "gen");
+  refreshPresetUI();
 
   // run button label
   if (els.runBtn) els.runBtn.textContent = (activeTab === "desc") ? "反推提示词" : "调用 API 生成";
 
-  // force describe tab to use form mode (no JSON editor)
   if (activeTab === "desc") {
-    setUiMode("form");
+    setDescUiMode(descUiMode);
+  } else {
+    setUiMode(uiMode);
   }
 
   // default: describe preset is full, and system prompt auto-filled (only if empty)
@@ -436,6 +472,108 @@ function setUiMode(mode) {
   }
 
   persistBase();
+}
+
+
+function setDescUiMode(mode) {
+  descUiMode = (mode === "json") ? "json" : "form";
+
+  if (els.descModeForm) {
+    els.descModeForm.classList.toggle("active", descUiMode === "form");
+    els.descModeForm.setAttribute("aria-selected", String(descUiMode === "form"));
+  }
+  if (els.descModeJson) {
+    els.descModeJson.classList.toggle("active", descUiMode === "json");
+    els.descModeJson.setAttribute("aria-selected", String(descUiMode === "json"));
+  }
+
+  if (els.descFormModeWrap) els.descFormModeWrap.classList.toggle("hidden", descUiMode !== "form");
+  if (els.descJsonModeWrap) els.descJsonModeWrap.classList.toggle("hidden", descUiMode !== "json");
+
+  if (activeTab === "desc" && descUiMode === "json" && els.descRequestBodyJson) {
+    try {
+      const body = buildDescribeBodyFromForm();
+      els.descRequestBodyJson.value = JSON.stringify(body, null, 2);
+      setStatus("", false);
+    } catch (e) {
+      setStatus(`切换到反推 JSON 模式失败：${e?.message || e}`, true);
+    }
+  }
+
+  persistBase();
+}
+
+function formatDescJsonEditor() {
+  const raw = (els.descRequestBodyJson?.value || "").trim();
+  if (!raw) { setStatus("反推 JSON 为空。", true); return; }
+  try {
+    const obj = JSON.parse(raw);
+    els.descRequestBodyJson.value = JSON.stringify(obj, null, 2);
+    setStatus("已格式化反推 JSON。", true);
+    setTimeout(() => setStatus("", false), 900);
+  } catch (e) {
+    setStatus(`JSON 解析失败：${e?.message || e}`, true);
+  }
+}
+
+function syncDescJsonFromForm() {
+  try {
+    const body = buildDescribeBodyFromForm();
+    if (els.descRequestBodyJson) els.descRequestBodyJson.value = JSON.stringify(body, null, 2);
+    setStatus("已从反推表单同步 JSON。", true);
+    setTimeout(() => setStatus("", false), 900);
+    persistBase();
+  } catch (e) {
+    setStatus(e?.message || String(e), true);
+  }
+}
+
+function applyDescJsonToFormBestEffort() {
+  const raw = (els.descRequestBodyJson?.value || "").trim();
+  if (!raw) { setStatus("反推 JSON 为空，无法回填。", true); return; }
+
+  let obj;
+  try { obj = JSON.parse(raw); }
+  catch (e) { setStatus(`JSON 解析失败：${e?.message || e}`, true); return; }
+
+  const sp = obj?.systemInstruction?.parts?.[0]?.text;
+  if (typeof sp === "string" && els.descSystemPrompt) els.descSystemPrompt.value = sp;
+
+  const parts = obj?.contents?.[0]?.parts || [];
+  let text = "";
+  const inlines = [];
+  for (const p of parts) {
+    if (!text && typeof p?.text === "string") text = p.text;
+    const cand = p?.inline_data || p?.inlineData;
+    if (cand?.data) inlines.push(cand);
+  }
+  if (els.descPrompt) els.descPrompt.value = text;
+
+  clearAllImages();
+  if (inlines.length) {
+    for (const inline of inlines) {
+      const mimeType = inline.mime_type || inline.mimeType || "application/octet-stream";
+      const base64 = inline.data;
+      const binary = atob(base64);
+      const bytes = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+      const blob = new Blob([bytes], { type: mimeType });
+      const dataUrl = URL.createObjectURL(blob);
+      selectedImages.push({ mimeType, base64, size: blob.size, name: "json_image", dataUrl });
+    }
+    renderInputImages();
+  }
+
+  const gc = obj?.generationConfig || {};
+  if (typeof gc.temperature === "number" && els.descTemperature) els.descTemperature.value = String(gc.temperature);
+  if (typeof gc.mediaResolution === "string" && els.descMediaResolution) els.descMediaResolution.value = gc.mediaResolution;
+  if (typeof gc?.thinkingConfig?.thinkingLevel === "string" && els.descThinkingLevel) {
+    els.descThinkingLevel.value = gc.thinkingConfig.thinkingLevel;
+  }
+
+  persistBase();
+  setStatus("已尝试将反推 JSON 回填到表单。", true);
+  setTimeout(() => setStatus("", false), 900);
 }
 
 function formatJsonEditor() {
@@ -621,64 +759,61 @@ function applyDescribePreset(presetId) {
   setTimeout(() => setStatus("", false), 900);
 }
 
-// ====================== generate presets (unchanged; no images saved) ======================
-function loadPresets() {
+// ====================== presets ======================
+const LOCKED_DESC_PRESET_NAMES = new Set(["全图", "仅背景", "仅人物", "仅风格/画风"]);
+
+function seedDefaultDescPresets() {
+  const existing = loadPresetsByTab("desc");
+  if (existing.length) return;
+  const now = nowISO();
+  const defaults = [
+    { name: "全图", descPresetId: "full", fields: { descPrompt: "", descSystemPrompt: DESCRIBE_PRESETS.full, temperature: "", mediaResolution: "", thinkingLevel: "" } },
+    { name: "仅背景", descPresetId: "background", fields: { descPrompt: "", descSystemPrompt: DESCRIBE_PRESETS.background, temperature: "", mediaResolution: "", thinkingLevel: "" } },
+    { name: "仅人物", descPresetId: "person", fields: { descPrompt: "", descSystemPrompt: DESCRIBE_PRESETS.person, temperature: "", mediaResolution: "", thinkingLevel: "" } },
+    { name: "仅风格/画风", descPresetId: "style", fields: { descPrompt: "", descSystemPrompt: DESCRIBE_PRESETS.style, temperature: "", mediaResolution: "", thinkingLevel: "" } },
+  ].map((x) => ({ ...x, createdAt: now, updatedAt: now, mode: "form", isDefault: true, kind: "desc" }));
+  localStorage.setItem(storageKeys.descPresets, JSON.stringify(defaults));
+}
+
+function presetKeyByTab(tab){ return tab === "desc" ? storageKeys.descPresets : storageKeys.genPresets; }
+function activePresetKeyByTab(tab){ return tab === "desc" ? storageKeys.activeDescPreset : storageKeys.activeGenPreset; }
+
+function loadPresetsByTab(tab) {
   try {
-    const raw = localStorage.getItem(storageKeys.presets);
+    const raw = localStorage.getItem(presetKeyByTab(tab));
     if (!raw) return [];
     const arr = JSON.parse(raw);
-    if (!Array.isArray(arr)) return [];
-
-    // migration: strip legacy image fields
-    let changed = false;
-    const normalized = arr.map(p => {
-      if (p && typeof p === "object" && "image" in p) {
-        changed = true;
-        const { image, ...rest } = p;
-        return rest;
-      }
-      return p;
-    });
-    if (changed) localStorage.setItem(storageKeys.presets, JSON.stringify(normalized));
-    return normalized;
-  } catch {
-    return [];
-  }
+    return Array.isArray(arr) ? arr : [];
+  } catch { return []; }
 }
+function savePresetsByTab(tab, arr) { localStorage.setItem(presetKeyByTab(tab), JSON.stringify(arr)); }
 
-function savePresets(arr) { localStorage.setItem(storageKeys.presets, JSON.stringify(arr)); }
-
-function refreshPresetUI() {
-  const presets = loadPresets();
-  const activeName = localStorage.getItem(storageKeys.activePreset) || "";
-
-  if (!els.presetSelect) return;
-
-  els.presetSelect.innerHTML = "";
-  const empty = document.createElement("option");
-  empty.value = "";
-  empty.textContent = "（无预设）";
-  els.presetSelect.appendChild(empty);
-
-  for (const p of presets) {
-    if (!p?.name) continue;
-    const opt = document.createElement("option");
-    opt.value = p.name;
-    opt.textContent = p.name;
-    if (p.name === activeName) opt.selected = true;
-    els.presetSelect.appendChild(opt);
+function makePresetFromCurrentState(tab) {
+  if (tab === "desc") {
+    return {
+      name: "",
+      createdAt: nowISO(),
+      updatedAt: nowISO(),
+      kind: "desc",
+      mode: descUiMode,
+      descPresetId: els.descPreset?.value || "full",
+      fields: {
+        descPrompt: els.descPrompt?.value || "",
+        descSystemPrompt: els.descSystemPrompt?.value || "",
+        temperature: els.descTemperature?.value || "",
+        mediaResolution: els.descMediaResolution?.value || "",
+        thinkingLevel: els.descThinkingLevel?.value || "",
+      },
+      requestBodyJson: els.descRequestBodyJson?.value || "",
+      isDefault: false,
+    };
   }
 
-  const hasActive = !!activeName && presets.some(p => p.name === activeName);
-  if (els.presetUpdate) els.presetUpdate.disabled = !hasActive;
-  if (els.presetDelete) els.presetDelete.disabled = !hasActive;
-}
-
-function makePresetFromCurrentGenState() {
   return {
     name: "",
     createdAt: nowISO(),
     updatedAt: nowISO(),
+    kind: "gen",
     mode: uiMode,
     fields: {
       systemPrompt: els.systemPrompt?.value || "",
@@ -692,9 +827,24 @@ function makePresetFromCurrentGenState() {
   };
 }
 
-function applyGenPreset(preset) {
-  setUiMode(preset.mode === "json" ? "json" : "form");
+function applyPreset(preset, tab) {
+  if (tab === "desc") {
+    setDescUiMode(preset.mode === "json" ? "json" : "form");
+    const f = preset.fields || {};
+    if (els.descPreset) els.descPreset.value = preset.descPresetId || "full";
+    if (els.descPrompt) els.descPrompt.value = f.descPrompt ?? "";
+    if (els.descSystemPrompt) els.descSystemPrompt.value = f.descSystemPrompt ?? "";
+    if (els.descTemperature) els.descTemperature.value = f.temperature ?? "";
+    if (els.descMediaResolution) els.descMediaResolution.value = f.mediaResolution ?? "";
+    if (els.descThinkingLevel) els.descThinkingLevel.value = f.thinkingLevel ?? "";
+    if (typeof preset.requestBodyJson === "string" && els.descRequestBodyJson) els.descRequestBodyJson.value = preset.requestBodyJson;
+    persistBase();
+    setStatus(`已应用反推预设：${preset.name}`, true);
+    setTimeout(() => setStatus("", false), 900);
+    return;
+  }
 
+  setUiMode(preset.mode === "json" ? "json" : "form");
   const f = preset.fields || {};
   if (els.systemPrompt) els.systemPrompt.value = f.systemPrompt ?? "";
   if (els.prompt) els.prompt.value = f.prompt ?? "";
@@ -702,161 +852,129 @@ function applyGenPreset(preset) {
   if (els.imageSize) els.imageSize.value = f.imageSize ?? "";
   if (els.temperature) els.temperature.value = f.temperature ?? "";
   if (els.topP) els.topP.value = f.topP ?? "";
-
-  if (typeof preset.requestBodyJson === "string" && els.requestBodyJson) {
-    els.requestBodyJson.value = preset.requestBodyJson;
-  }
-
+  if (typeof preset.requestBodyJson === "string" && els.requestBodyJson) els.requestBodyJson.value = preset.requestBodyJson;
   persistBase();
-  setStatus(`已应用图像生成预设：${preset.name}\n（Host/Key 不变；图片不随预设切换）`, true);
+  setStatus(`已应用图像生成预设：${preset.name}
+（Host/Key 不变；图片不随预设切换）`, true);
   setTimeout(() => setStatus("", false), 1100);
 }
 
-function saveAsGenPreset() {
-  const name = (prompt("请输入图像生成预设名称（不包含 Host/Key；不包含图片）：") || "").trim();
-  if (!name) return;
-
-  const presets = loadPresets();
-  const existing = presets.find(p => p.name === name);
-
-  if (existing) {
-    const ok = confirm(`预设“${name}”已存在，是否覆盖？`);
-    if (!ok) return;
-    const next = makePresetFromCurrentGenState();
-    next.name = name;
-    next.createdAt = existing.createdAt || nowISO();
-    next.updatedAt = nowISO();
-    presets[presets.findIndex(p => p.name === name)] = next;
-  } else {
-    const next = makePresetFromCurrentGenState();
-    next.name = name;
-    presets.push(next);
+function refreshPresetUI() {
+  const tab = activeTab;
+  const presets = loadPresetsByTab(tab);
+  const activeName = localStorage.getItem(activePresetKeyByTab(tab)) || "";
+  if (!els.presetSelect) return;
+  els.presetSelect.innerHTML = "";
+  const empty = document.createElement("option");
+  empty.value = "";
+  empty.textContent = "（无预设）";
+  els.presetSelect.appendChild(empty);
+  for (const p of presets) {
+    if (!p?.name) continue;
+    const opt = document.createElement("option");
+    opt.value = p.name;
+    opt.textContent = p.name;
+    if (p.name === activeName) opt.selected = true;
+    els.presetSelect.appendChild(opt);
   }
-
-  savePresets(presets);
-  localStorage.setItem(storageKeys.activePreset, name);
-  refreshPresetUI();
-  setStatus(`已保存图像生成预设：${name}`, true);
-  setTimeout(() => setStatus("", false), 1000);
+  const activePreset = presets.find((p) => p.name === activeName);
+  const hasActive = !!activePreset;
+  if (els.presetUpdate) els.presetUpdate.disabled = !hasActive;
+  if (els.presetDelete) els.presetDelete.disabled = !hasActive || (tab === "desc" && activePreset?.isDefault);
 }
 
-function updateActiveGenPreset() {
-  const name = els.presetSelect?.value || "";
+function saveAsPreset() {
+  const tab = activeTab;
+  const name = (prompt(`请输入${tab === "desc" ? "提示词反推" : "图像生成"}预设名称：`) || "").trim();
   if (!name) return;
-
-  const presets = loadPresets();
-  const idx = presets.findIndex(p => p.name === name);
-  if (idx < 0) return;
-
-  const ok = confirm(`确认更新预设“${name}”？（图片不会被保存）`);
-  if (!ok) return;
-
-  const existing = presets[idx];
-  const next = makePresetFromCurrentGenState();
+  const presets = loadPresetsByTab(tab);
+  const idx = presets.findIndex((p) => p.name === name);
+  if (idx >= 0 && !confirm(`预设“${name}”已存在，是否覆盖？`)) return;
+  const existing = idx >= 0 ? presets[idx] : null;
+  const next = makePresetFromCurrentState(tab);
   next.name = name;
-  next.createdAt = existing.createdAt || nowISO();
+  next.createdAt = existing?.createdAt || nowISO();
   next.updatedAt = nowISO();
-  presets[idx] = next;
-
-  savePresets(presets);
-  localStorage.setItem(storageKeys.activePreset, name);
+  if (idx >= 0) presets[idx] = next; else presets.push(next);
+  savePresetsByTab(tab, presets);
+  localStorage.setItem(activePresetKeyByTab(tab), name);
   refreshPresetUI();
-  setStatus(`已更新预设：${name}`, true);
-  setTimeout(() => setStatus("", false), 1000);
 }
 
-function deleteActiveGenPreset() {
+function updateActivePreset() {
+  const tab = activeTab;
   const name = els.presetSelect?.value || "";
   if (!name) return;
-
-  const ok = confirm(`确认删除预设“${name}”？该操作不可撤销。`);
-  if (!ok) return;
-
-  const presets = loadPresets().filter(p => p.name !== name);
-  savePresets(presets);
-
-  localStorage.removeItem(storageKeys.activePreset);
+  const presets = loadPresetsByTab(tab);
+  const idx = presets.findIndex((p) => p.name === name);
+  if (idx < 0) return;
+  if (tab === "desc" && presets[idx].isDefault) { setStatus("默认四个预设不可更新。", true); return; }
+  if (!confirm(`确认更新预设“${name}”？`)) return;
+  const next = makePresetFromCurrentState(tab);
+  next.name = name;
+  next.createdAt = presets[idx].createdAt || nowISO();
+  next.updatedAt = nowISO();
+  next.isDefault = !!presets[idx].isDefault;
+  presets[idx] = next;
+  savePresetsByTab(tab, presets);
   refreshPresetUI();
-  setStatus(`已删除预设：${name}`, true);
-  setTimeout(() => setStatus("", false), 1000);
 }
 
-function exportGenPresets() {
-  const presets = loadPresets();
-  const payload = { version: 3, exportedAt: nowISO(), presets };
+function deleteActivePreset() {
+  const tab = activeTab;
+  const name = els.presetSelect?.value || "";
+  if (!name) return;
+  const presets = loadPresetsByTab(tab);
+  const target = presets.find((p) => p.name === name);
+  if (tab === "desc" && target?.isDefault) { setStatus("默认四个预设不可删除。", true); return; }
+  if (!confirm(`确认删除预设“${name}”？该操作不可撤销。`)) return;
+  savePresetsByTab(tab, presets.filter((p) => p.name !== name));
+  localStorage.removeItem(activePresetKeyByTab(tab));
+  refreshPresetUI();
+}
+
+function exportAllPresets() {
+  const payload = {
+    version: 4,
+    exportedAt: nowISO(),
+    genPresets: loadPresetsByTab("gen"),
+    descPresets: loadPresetsByTab("desc"),
+  };
   const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
   const url = URL.createObjectURL(blob);
-
   const a = document.createElement("a");
   a.href = url;
-  a.download = `gemini3_gen_presets_${timestampTag()}.json`;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-
+  a.download = `gemini3_all_presets_${timestampTag()}.json`;
+  document.body.appendChild(a); a.click(); a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 5000);
-  setStatus(`已导出图像生成预设：${presets.length} 个`, true);
-  setTimeout(() => setStatus("", false), 1000);
+  setStatus("已批量导出所有模式预设。", true);
 }
 
-async function importGenPresetsFromFile(file) {
+async function importAllPresetsFromFile(file) {
   if (!file) return;
-
   let text = "";
-  try { text = await file.text(); }
-  catch (e) { setStatus(`读取导入文件失败：${e?.message || e}`, true); return; }
-
+  try { text = await file.text(); } catch (e) { setStatus(`读取导入文件失败：${e?.message || e}`, true); return; }
   let obj;
-  try { obj = JSON.parse(text); }
-  catch (e) { setStatus(`导入失败：JSON 解析错误：${e?.message || e}`, true); return; }
+  try { obj = JSON.parse(text); } catch (e) { setStatus(`导入失败：JSON 解析错误：${e?.message || e}`, true); return; }
 
-  const incoming = Array.isArray(obj?.presets) ? obj.presets : (Array.isArray(obj) ? obj : []);
-  if (!incoming.length) { setStatus("导入失败：未发现 presets 数组。", true); return; }
+  const incomingGen = Array.isArray(obj?.genPresets) ? obj.genPresets : [];
+  const incomingDesc = Array.isArray(obj?.descPresets) ? obj.descPresets : [];
 
-  const existing = loadPresets();
-  const nameSet = new Set(existing.map(p => p.name));
-
-  const merged = [...existing];
-  let added = 0;
-
-  for (const p of incoming) {
-    if (!p?.name) continue;
-    let name = String(p.name).trim();
-    if (!name) continue;
-
-    if (nameSet.has(name)) {
-      let i = 1;
-      while (nameSet.has(`${name}（导入${i}）`)) i++;
-      name = `${name}（导入${i}）`;
+  if (incomingGen.length) savePresetsByTab("gen", incomingGen);
+  if (incomingDesc.length) {
+    const merged = [...incomingDesc];
+    const names = new Set(merged.map((x) => x.name));
+    for (const n of LOCKED_DESC_PRESET_NAMES) {
+      if (!names.has(n)) {
+        const id = n === "全图" ? "full" : n === "仅背景" ? "background" : n === "仅人物" ? "person" : "style";
+        merged.push({ name: n, descPresetId: id, mode: "form", isDefault: true, kind: "desc", createdAt: nowISO(), updatedAt: nowISO(), fields: { descPrompt: "", descSystemPrompt: DESCRIBE_PRESETS[id], temperature: "", mediaResolution: "", thinkingLevel: "" }, requestBodyJson: "" });
+      }
     }
-
-    const safePreset = {
-      name,
-      createdAt: p.createdAt || nowISO(),
-      updatedAt: nowISO(),
-      mode: (p.mode === "json") ? "json" : "form",
-      fields: {
-        systemPrompt: p?.fields?.systemPrompt ?? "",
-        prompt: p?.fields?.prompt ?? "",
-        aspectRatio: p?.fields?.aspectRatio ?? "",
-        imageSize: p?.fields?.imageSize ?? "",
-        temperature: p?.fields?.temperature ?? "",
-        topP: p?.fields?.topP ?? "",
-      },
-      requestBodyJson: typeof p.requestBodyJson === "string" ? p.requestBodyJson : "",
-    };
-
-    merged.push(safePreset);
-    nameSet.add(name);
-    added++;
+    savePresetsByTab("desc", merged);
   }
 
-  if (!added) { setStatus("导入完成：未新增任何有效预设。", true); return; }
-
-  savePresets(merged);
   refreshPresetUI();
-  setStatus(`导入完成：新增 ${added} 个图像生成预设。`, true);
-  setTimeout(() => setStatus("", false), 1200);
+  setStatus("已批量导入预设。", true);
 }
 
 // ====================== Request building ======================
@@ -919,19 +1037,24 @@ function buildDescribeBodyFromForm() {
   }
 
   const sys = (els.descSystemPrompt?.value || "").trim();
-  const userPrompt = (els.descPrompt?.value || ""); // allow empty
+  const userPrompt = (els.descPrompt?.value || "");
+  const temperature = safeNumberOrEmpty(els.descTemperature?.value);
+  const mediaResolution = els.descMediaResolution?.value || "";
+  const thinkingLevel = els.descThinkingLevel?.value || "";
 
-  // user parts: optional text + images
   const parts = [{ text: userPrompt }];
   for (const img of selectedImages) {
     parts.push({ inline_data: { mime_type: img.mimeType, data: img.base64 } });
   }
 
-  const body = {
-    contents: [{ role: "user", parts }],
-  };
-
+  const body = { contents: [{ role: "user", parts }] };
   if (sys) body.systemInstruction = { parts: [{ text: sys }] };
+
+  const generationConfig = {};
+  if (temperature !== "") generationConfig.temperature = temperature;
+  if (mediaResolution) generationConfig.mediaResolution = mediaResolution;
+  if (thinkingLevel) generationConfig.thinkingConfig = { thinkingLevel };
+  if (Object.keys(generationConfig).length) body.generationConfig = generationConfig;
 
   return body;
 }
@@ -940,7 +1063,15 @@ function buildRequest() {
   if (activeTab === "desc") {
     const modelId = MODEL_DESC;
     const base = buildCommonRequestBase(modelId);
-    const body = buildDescribeBodyFromForm();
+    let body;
+    if (descUiMode === "json") {
+      const raw = (els.descRequestBodyJson?.value || "").trim();
+      if (!raw) throw new Error("反推 JSON 为空。请填写请求体 JSON 或切回表单模式。");
+      try { body = JSON.parse(raw); }
+      catch (e) { throw new Error(`反推 JSON 解析失败：${e?.message || e}`); }
+    } else {
+      body = buildDescribeBodyFromForm();
+    }
     return { ...base, body, modelId };
   }
 
@@ -1171,8 +1302,13 @@ function resetNonFixedFields() {
   if (els.descPreset) els.descPreset.value = "full";
   if (els.descPrompt) els.descPrompt.value = "";
   if (els.descSystemPrompt) els.descSystemPrompt.value = DESCRIBE_PRESETS.full;
+  if (els.descTemperature) els.descTemperature.value = "";
+  if (els.descMediaResolution) els.descMediaResolution.value = "";
+  if (els.descThinkingLevel) els.descThinkingLevel.value = "";
+  if (els.descRequestBodyJson) els.descRequestBodyJson.value = "";
 
   setUiMode("form");
+  setDescUiMode("form");
 
   setStatus("", false);
   if (els.result) els.result.classList.add("hidden");
@@ -1205,6 +1341,10 @@ function wireEvents() {
     els.descPreset?.addEventListener(evt, persistBase);
     els.descPrompt?.addEventListener(evt, persistBase);
     els.descSystemPrompt?.addEventListener(evt, persistBase);
+    els.descTemperature?.addEventListener(evt, persistBase);
+    els.descMediaResolution?.addEventListener(evt, persistBase);
+    els.descThinkingLevel?.addEventListener(evt, persistBase);
+    els.descRequestBodyJson?.addEventListener(evt, persistBase);
   });
 
   els.rememberKey?.addEventListener("change", () => {
@@ -1220,14 +1360,19 @@ function wireEvents() {
   els.tabGen?.addEventListener("click", () => setActiveTab("gen"));
   els.tabDesc?.addEventListener("click", () => setActiveTab("desc"));
 
-  // gen ui mode
+  // gen/desc ui mode
   els.modeForm?.addEventListener("click", () => setUiMode("form"));
   els.modeJson?.addEventListener("click", () => setUiMode("json"));
+  els.descModeForm?.addEventListener("click", () => setDescUiMode("form"));
+  els.descModeJson?.addEventListener("click", () => setDescUiMode("json"));
 
   // json tools
   els.jsonFormat?.addEventListener("click", formatJsonEditor);
   els.jsonFromForm?.addEventListener("click", syncJsonFromForm);
   els.jsonToForm?.addEventListener("click", applyJsonToFormBestEffort);
+  els.descJsonFormat?.addEventListener("click", formatDescJsonEditor);
+  els.descJsonFromForm?.addEventListener("click", syncDescJsonFromForm);
+  els.descJsonToForm?.addEventListener("click", applyDescJsonToFormBestEffort);
 
   // describe preset: overwrite system prompt
   els.descPreset?.addEventListener("change", () => {
@@ -1292,30 +1437,31 @@ function wireEvents() {
     setTimeout(() => setStatus("", false), 900);
   });
 
-  // gen presets
+  // presets (all modes)
   els.presetSelect?.addEventListener("change", () => {
+    const tab = activeTab;
     const name = els.presetSelect.value || "";
     if (!name) {
-      localStorage.removeItem(storageKeys.activePreset);
+      localStorage.removeItem(activePresetKeyByTab(tab));
       refreshPresetUI();
       return;
     }
-    localStorage.setItem(storageKeys.activePreset, name);
-    const presets = loadPresets();
+    localStorage.setItem(activePresetKeyByTab(tab), name);
+    const presets = loadPresetsByTab(tab);
     const p = presets.find(x => x.name === name);
-    if (p) applyGenPreset(p);
+    if (p) applyPreset(p, tab);
     refreshPresetUI();
   });
 
-  els.presetSave?.addEventListener("click", saveAsGenPreset);
-  els.presetUpdate?.addEventListener("click", updateActiveGenPreset);
-  els.presetDelete?.addEventListener("click", deleteActiveGenPreset);
-  els.presetExport?.addEventListener("click", exportGenPresets);
+  els.presetSave?.addEventListener("click", saveAsPreset);
+  els.presetUpdate?.addEventListener("click", updateActivePreset);
+  els.presetDelete?.addEventListener("click", deleteActivePreset);
+  els.presetExport?.addEventListener("click", exportAllPresets);
 
   els.presetImport?.addEventListener("change", async () => {
     const f = els.presetImport.files?.[0];
     els.presetImport.value = "";
-    await importGenPresetsFromFile(f);
+    await importAllPresetsFromFile(f);
   });
 
   // iOS background
@@ -1329,6 +1475,7 @@ function wireEvents() {
 function init() {
   restoreBase();
   wireEvents();
+  seedDefaultDescPresets();
   refreshPresetUI();
   renderInputImages();
 
@@ -1338,7 +1485,9 @@ function init() {
     els.descSystemPrompt.value = DESCRIBE_PRESETS[pid] || DESCRIBE_PRESETS.full;
   }
 
-  // apply stored tab
+  // apply stored modes/tab
+  setUiMode(uiMode);
+  setDescUiMode(descUiMode);
   setActiveTab(activeTab);
 
   // if entering desc tab, ensure system prompt consistent with selected preset if empty

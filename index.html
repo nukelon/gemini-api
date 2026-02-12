@@ -19,21 +19,6 @@
           </p>
         </div>
 
-        <!-- 仅用于“图像生成”模式的预设工具栏 -->
-        <div id="presetbarGen" class="presetbar" aria-label="图像生成预设工具栏">
-          <select id="presetSelect" class="presetSelect" title="选择图像生成预设">
-            <option value="">（无预设）</option>
-          </select>
-          <button id="presetSave" type="button" class="btn secondary">保存为预设</button>
-          <button id="presetUpdate" type="button" class="btn secondary" disabled>更新预设</button>
-          <button id="presetDelete" type="button" class="btn secondary" disabled>删除预设</button>
-          <button id="presetExport" type="button" class="btn secondary">导出</button>
-
-          <label class="btn secondary filebtn" title="导入预设（JSON）">
-            导入
-            <input id="presetImport" type="file" accept="application/json" />
-          </label>
-        </div>
       </div>
     </div>
   </header>
@@ -43,6 +28,28 @@
       <h2 class="section-title">配置</h2>
 
       <form id="form" autocomplete="off">
+        <!-- 顶层功能选项卡（提前到预设栏上方） -->
+        <div class="tabbar modebar" role="tablist" aria-label="功能选项卡">
+          <button id="tabGen" type="button" class="seg active" role="tab" aria-selected="true">图像生成</button>
+          <button id="tabDesc" type="button" class="seg" role="tab" aria-selected="false">提示词反推</button>
+        </div>
+
+        <!-- 全局预设工具栏：图像生成 / 提示词反推共用 -->
+        <div id="presetbar" class="presetbar" aria-label="预设工具栏">
+          <select id="presetSelect" class="presetSelect" title="选择当前模式预设">
+            <option value="">（无预设）</option>
+          </select>
+          <button id="presetSave" type="button" class="btn secondary">添加预设</button>
+          <button id="presetUpdate" type="button" class="btn secondary" disabled>更新预设</button>
+          <button id="presetDelete" type="button" class="btn secondary" disabled>删除预设</button>
+          <button id="presetExport" type="button" class="btn secondary">批量导出预设</button>
+
+          <label class="btn secondary filebtn" title="导入预设（JSON）">
+            批量导入预设
+            <input id="presetImport" type="file" accept="application/json" />
+          </label>
+        </div>
+
         <div class="grid">
           <label class="field">
             <span class="label">API 主机地址（可选）</span>
@@ -65,12 +72,6 @@
             </div>
             <span class="hint">GitHub Pages 为纯前端，无法真正隐藏 Key；建议做来源域名限制或使用服务端中转。</span>
           </label>
-        </div>
-
-        <!-- 顶层功能选项卡 -->
-        <div class="tabbar modebar" role="tablist" aria-label="功能选项卡">
-          <button id="tabGen" type="button" class="seg active" role="tab" aria-selected="true">图像生成</button>
-          <button id="tabDesc" type="button" class="seg" role="tab" aria-selected="false">提示词反推</button>
         </div>
 
         <!-- 共用：输入图片 -->
@@ -177,32 +178,77 @@
 
         <!-- ============== 提示词反推面板 ============== -->
         <div id="paneDesc" class="hidden">
-          <div class="grid">
-            <label class="field">
-              <span class="label">反推预设（通过覆盖系统提示词生效）</span>
-              <select id="descPreset">
-                <option value="full">全图（默认）</option>
-                <option value="background">仅背景</option>
-                <option value="person">仅人物</option>
-                <option value="style">仅风格/画风（合并）</option>
-              </select>
-              <span class="hint">
-                该预设会把下方“系统提示词”替换为英文高精度反推指令；你可以在替换后继续手动微调。
-              </span>
-            </label>
+          <div class="modebar" role="tablist" aria-label="请求体编辑模式（提示词反推）">
+            <button id="descModeForm" type="button" class="seg active" role="tab" aria-selected="true">表单模式</button>
+            <button id="descModeJson" type="button" class="seg" role="tab" aria-selected="false">JSON 模式</button>
+          </div>
 
-            <label class="field">
-              <span class="label">提示词（可选，作为补充要求）</span>
-              <textarea id="descPrompt" rows="5" placeholder="可留空。可写：更偏电影感/更接近二次元/强调服装细节/保留logo等。"></textarea>
-              <span class="hint">反推输出要求：仅输出英文提示词本体，不输出负面提示词、也不输出解释。</span>
-            </label>
+          <div id="descFormModeWrap">
+            <div class="grid">
+              <label class="field">
+                <span class="label">反推预设（通过覆盖系统提示词生效）</span>
+                <select id="descPreset">
+                  <option value="full">全图</option>
+                  <option value="background">仅背景</option>
+                  <option value="person">仅人物</option>
+                  <option value="style">仅风格/画风</option>
+                </select>
+                <span class="hint">
+                  该预设会把下方“系统提示词”替换为英文高精度反推指令；你可以在替换后继续手动微调。
+                </span>
+              </label>
+
+              <label class="field">
+                <span class="label">提示词（可选，作为补充要求）</span>
+                <textarea id="descPrompt" rows="5" placeholder="可留空。可写：更偏电影感/更接近二次元/强调服装细节/保留logo等。"></textarea>
+                <span class="hint">反推输出要求：仅输出英文提示词本体，不输出负面提示词、也不输出解释。</span>
+              </label>
+
+              <label class="field full">
+                <span class="label">系统提示词（英文，反推模式核心）</span>
+                <textarea id="descSystemPrompt" rows="10" spellcheck="false"></textarea>
+                <span class="hint">会调用 gemini-3-pro-preview（非图像生成模型）。反推模式必须至少上传 1 张图片。</span>
+              </label>
+
+              <label class="field">
+                <span class="label">Temperature（可选，0–2）</span>
+                <input id="descTemperature" type="number" inputmode="decimal" min="0" max="2" step="0.1" placeholder="留空使用模型默认" />
+              </label>
+
+              <label class="field">
+                <span class="label">Media resolution（可选）</span>
+                <select id="descMediaResolution">
+                  <option value="">默认</option>
+                  <option value="MEDIA_RESOLUTION_LOW">LOW（64 tokens）</option>
+                  <option value="MEDIA_RESOLUTION_MEDIUM">MEDIUM（256 tokens）</option>
+                  <option value="MEDIA_RESOLUTION_HIGH">HIGH（zoomed reframing）</option>
+                </select>
+              </label>
+
+              <label class="field">
+                <span class="label">Thinking level（可选）</span>
+                <select id="descThinkingLevel">
+                  <option value="">默认（HIGH）</option>
+                  <option value="MINIMAL">MINIMAL</option>
+                  <option value="LOW">LOW</option>
+                  <option value="MEDIUM">MEDIUM</option>
+                  <option value="HIGH">HIGH</option>
+                </select>
+              </label>
+            </div>
+          </div>
+
+          <div id="descJsonModeWrap" class="hidden">
+            <div class="jsonbar">
+              <button id="descJsonFormat" type="button" class="btn secondary">格式化 JSON</button>
+              <button id="descJsonFromForm" type="button" class="btn secondary">从表单同步</button>
+              <button id="descJsonToForm" type="button" class="btn secondary">回填到表单</button>
+            </div>
 
             <label class="field full">
-              <span class="label">系统提示词（英文，反推模式核心）</span>
-              <textarea id="descSystemPrompt" rows="10" spellcheck="false"></textarea>
-              <span class="hint">
-                会调用 gemini-3-pro-preview（非图像生成模型）。反推模式必须至少上传 1 张图片。
-              </span>
+              <span class="label">反推请求体 JSON（将直接作为 POST body 发送）</span>
+              <textarea id="descRequestBodyJson" rows="16" spellcheck="false"
+                placeholder='例如：{"contents":[{"role":"user","parts":[{"text":""}]}],"generationConfig":{"temperature":0.7,"mediaResolution":"MEDIA_RESOLUTION_MEDIUM","thinkingConfig":{"thinkingLevel":"LOW"}}}'></textarea>
             </label>
           </div>
         </div>
