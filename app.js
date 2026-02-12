@@ -514,28 +514,38 @@ function applyJsonToFormBestEffort() {
 }
 
 // ====================== Describe presets (system prompt templates) ======================
-// 要求：英文、只输出提示词本体、不输出负面提示词；详细自然语言 + 多区域格式化；必要时混用 Danbooru tags
-function baseDescribeSystemPrompt(focusLine) {
+// 要求：英文、只输出提示词本体、不输出负面提示词；按预设范围描述；类 Danbooru 标签可选
+function baseDescribeSystemPrompt({ focusRule, scopeRule, formatBlock }) {
   return `You are an Image-to-Prompt reverse-engineering assistant.
-Your job: given one or more reference images, produce a single English prompt that can recreate the image as closely as possible using the image generation model "${MODEL_IMAGE}".
+Your task: analyze one or more reference images and output ONE high-quality English prompt for the image generation model "${MODEL_IMAGE}".
 
-STRICT OUTPUT RULES (must follow):
-- Output ONLY the prompt body. No preface, no explanation, no bullet-point commentary about what you did.
-- DO NOT output a negative prompt. Do not include a "Negative Prompt" section.
-- Write in English only.
+OUTPUT RULES:
+- ${focusRule}
+- Output only the prompt body. No explanations, no prefacing text, no meta commentary.
+- Do not output any negative prompt.
+- English only.
 
-PROMPT QUALITY REQUIREMENTS:
-- Use highly specific, unambiguous natural language with rich visual detail and measurable cues.
-- Use a multi-region, formatted prompt so it is easy to copy and works well for image generation.
-- Include: subject identity & attributes, action/pose/gesture, clothing & accessories, environment/background, lighting, color palette, materials & textures, composition/framing, camera viewpoint, lens & depth of field, and especially STYLE & RENDERING details.
-- STYLE & RENDERING must be extremely detailed (rendering pipeline feel, medium, line/edge handling, shading model, texture fidelity, grain/noise, tone mapping, contrast curve, post-processing cues, etc.).
+QUALITY RULES:
+- Be concrete, visual, measurable, and reproducible; avoid vague wording.
+- Preserve faithful visual reconstruction rather than adding creative content.
+- Keep dense, high-granularity detail inside the allowed scope.
+- Use precise nouns/adjectives, quantifiable cues, and clear spatial/material relationships.
+- For style/rendering details when in scope, be exceptionally specific: medium traits, line/edge behavior, shape language, shading model, color response, contrast curve, tone mapping, texture fidelity, grain/noise pattern, post-processing artifacts, and overall rendering pipeline feel.
+- ${scopeRule}
 
-DANBOORU TAG MIX (when appropriate):
-- If the image is anime/illustration or benefits from tag-like descriptors, append a short "Tags:" line at the end using Danbooru-style tags (e.g., 1girl, solo, detailed_background, rim_lighting), but keep the main body as natural language.
-- If tags are not appropriate, omit the "Tags:" line.
+TAGS POLICY (optional):
+- You may add a short "Tags:" line in Danbooru-like style only when it clearly improves prompt usability.
+- Tags are optional, and never a replacement for detailed natural-language description.
 
-FORMAT (output exactly this structure, but fill with content; keep it compact yet detailed):
-[Subject]
+FORMAT:
+${formatBlock}`.trim();
+}
+
+const DESCRIBE_PRESETS = {
+  full: baseDescribeSystemPrompt({
+    focusRule: `Focus = FULL SCENE: describe all major visual dimensions for faithful reconstruction.`,
+    scopeRule: `Include subject, action/pose, clothing/accessories, environment, lighting, camera/composition, and very detailed style/rendering traits.`,
+    formatBlock: `[Subject]
 ...
 [Action / Pose]
 ...
@@ -550,24 +560,56 @@ FORMAT (output exactly this structure, but fill with content; keep it compact ye
 [Style & Rendering]
 ...
 [Quality / Fidelity]
+...`
+  }),
+  background: baseDescribeSystemPrompt({
+    focusRule: `Focus = BACKGROUND / ENVIRONMENT ONLY: describe only environment-domain information and omit every non-environment detail.`,
+    scopeRule: `Do not describe person identity, pose, clothing, or standalone style-pipeline analysis unless directly visible as environment properties.`,
+    formatBlock: `[Background / Environment]
 ...
-${focusLine}`.trim();
-}
-
-// 合并 style + rendering
-const DESCRIBE_PRESETS = {
-  full: baseDescribeSystemPrompt(
-    `Focus: FULL SCENE reconstruction (subject + action + background + style). Prioritize faithful reproduction over creativity.`
-  ),
-  background: baseDescribeSystemPrompt(
-    `Focus: BACKGROUND/ENVIRONMENT only. Minimize the subject description. Emphasize architecture, set dressing, spatial layout, materials, atmosphere, weather, and lighting.`
-  ),
-  person: baseDescribeSystemPrompt(
-    `Focus: SUBJECT/PERSON only. Minimize the background. Emphasize face, hair, expression, body, pose, clothing construction details, accessories, and skin/fabric texture fidelity.`
-  ),
-  style: baseDescribeSystemPrompt(
-    `Focus: STYLE & RENDERING extraction (style/medium/rendering pipeline). Still include minimal subject/background anchors, but allocate most detail budget to style and rendering traits so it can be reused.`
-  ),
+[Layout / Architecture / Props]
+...
+[Materials / Textures]
+...
+[Lighting / Atmosphere / Weather]
+...
+[Camera / Framing (environment only)]
+...
+[Quality / Fidelity]
+...`
+  }),
+  person: baseDescribeSystemPrompt({
+    focusRule: `Focus = SUBJECT / PERSON ONLY: describe only person-domain information and omit every non-person detail.`,
+    scopeRule: `Do not describe background world-building or standalone style-pipeline analysis; keep all details person-centric.`,
+    formatBlock: `[Subject Identity / Appearance]
+...
+[Face / Hair / Expression]
+...
+[Body / Pose / Gesture]
+...
+[Clothing / Accessories]
+...
+[Surface Detail (skin / fabric / small features)]
+...
+[Quality / Fidelity]
+...`
+  }),
+  style: baseDescribeSystemPrompt({
+    focusRule: `Focus = STYLE & RENDERING ONLY: describe only reusable style/rendering characteristics and omit semantic scene/subject content.`,
+    scopeRule: `Do not describe subject/background semantics; provide deep, reusable style/medium/rendering/post-processing characteristics only.`,
+    formatBlock: `[Style Family / Medium]
+...
+[Line / Edge / Shape Language]
+...
+[Shading / Rendering Behavior]
+...
+[Color / Contrast / Tone Mapping]
+...
+[Texture / Grain / Post-processing]
+...
+[Quality / Fidelity]
+...`
+  }),
 };
 
 function applyDescribePreset(presetId) {
