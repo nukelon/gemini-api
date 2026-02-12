@@ -514,38 +514,28 @@ function applyJsonToFormBestEffort() {
 }
 
 // ====================== Describe presets (system prompt templates) ======================
-// 要求：英文、只输出提示词本体、不输出负面提示词；按预设范围描述；类 Danbooru 标签可选
-function baseDescribeSystemPrompt({ focusLine, scopeRule, formatBlock }) {
+// 要求：英文、只输出提示词本体、不输出负面提示词；详细自然语言 + 多区域格式化；必要时混用 Danbooru tags
+function baseDescribeSystemPrompt(focusLine) {
   return `You are an Image-to-Prompt reverse-engineering assistant.
-Your task: analyze one or more reference images and output ONE high-quality English prompt for the image generation model "${MODEL_IMAGE}".
+Your job: given one or more reference images, produce a single English prompt that can recreate the image as closely as possible using the image generation model "${MODEL_IMAGE}".
 
-OUTPUT RULES:
-- Output only the prompt body. No explanations, no prefacing text, no meta commentary.
-- Do not output any negative prompt.
-- English only.
-- Treat the selected focus as a strict scope boundary.
-- If focus is not full-scene, describe only the selected scope and omit all other scopes completely.
+STRICT OUTPUT RULES (must follow):
+- Output ONLY the prompt body. No preface, no explanation, no bullet-point commentary about what you did.
+- DO NOT output a negative prompt. Do not include a "Negative Prompt" section.
+- Write in English only.
 
-QUALITY RULES:
-- Be concrete, visual, and reproducible; avoid vague wording.
-- Keep rich detail inside the selected scope.
-- Preserve faithful visual reconstruction rather than adding creative content.
-- ${scopeRule}
+PROMPT QUALITY REQUIREMENTS:
+- Use highly specific, unambiguous natural language with rich visual detail and measurable cues.
+- Use a multi-region, formatted prompt so it is easy to copy and works well for image generation.
+- Include: subject identity & attributes, action/pose/gesture, clothing & accessories, environment/background, lighting, color palette, materials & textures, composition/framing, camera viewpoint, lens & depth of field, and especially STYLE & RENDERING details.
+- STYLE & RENDERING must be extremely detailed (rendering pipeline feel, medium, line/edge handling, shading model, texture fidelity, grain/noise, tone mapping, contrast curve, post-processing cues, etc.).
 
-TAGS POLICY (optional):
-- You may add a short "Tags:" line in Danbooru-like style only when it clearly improves prompt usability.
-- Tags are optional, and never a replacement for detailed natural-language description.
+DANBOORU TAG MIX (when appropriate):
+- If the image is anime/illustration or benefits from tag-like descriptors, append a short "Tags:" line at the end using Danbooru-style tags (e.g., 1girl, solo, detailed_background, rim_lighting), but keep the main body as natural language.
+- If tags are not appropriate, omit the "Tags:" line.
 
-FORMAT:
-${formatBlock}
-${focusLine}`.trim();
-}
-
-const DESCRIBE_PRESETS = {
-  full: baseDescribeSystemPrompt({
-    focusLine: `Focus: FULL SCENE. Cover all major visual dimensions for faithful reconstruction.`,
-    scopeRule: `Include subject, action/pose, clothing/accessories, environment, lighting, camera/composition, and style/rendering details.`,
-    formatBlock: `[Subject]
+FORMAT (output exactly this structure, but fill with content; keep it compact yet detailed):
+[Subject]
 ...
 [Action / Pose]
 ...
@@ -560,56 +550,24 @@ const DESCRIBE_PRESETS = {
 [Style & Rendering]
 ...
 [Quality / Fidelity]
-...`
-  }),
-  background: baseDescribeSystemPrompt({
-    focusLine: `Focus: BACKGROUND / ENVIRONMENT ONLY.`,
-    scopeRule: `Do not describe person identity, pose, clothing, or standalone style-pipeline analysis unless directly visible as environment properties.`,
-    formatBlock: `[Background / Environment]
 ...
-[Layout / Architecture / Props]
-...
-[Materials / Textures]
-...
-[Lighting / Atmosphere / Weather]
-...
-[Camera / Framing (environment only)]
-...
-[Quality / Fidelity]
-...`
-  }),
-  person: baseDescribeSystemPrompt({
-    focusLine: `Focus: SUBJECT / PERSON ONLY.`,
-    scopeRule: `Do not describe background world-building or standalone style-pipeline analysis; keep all details person-centric.`,
-    formatBlock: `[Subject Identity / Appearance]
-...
-[Face / Hair / Expression]
-...
-[Body / Pose / Gesture]
-...
-[Clothing / Accessories]
-...
-[Surface Detail (skin / fabric / small features)]
-...
-[Quality / Fidelity]
-...`
-  }),
-  style: baseDescribeSystemPrompt({
-    focusLine: `Focus: STYLE & RENDERING ONLY.`,
-    scopeRule: `Do not describe subject/background semantics; describe reusable style, medium, rendering behavior, and post-processing characteristics only.`,
-    formatBlock: `[Style Family / Medium]
-...
-[Line / Edge / Shape Language]
-...
-[Shading / Rendering Behavior]
-...
-[Color / Contrast / Tone Mapping]
-...
-[Texture / Grain / Post-processing]
-...
-[Quality / Fidelity]
-...`
-  }),
+${focusLine}`.trim();
+}
+
+// 合并 style + rendering
+const DESCRIBE_PRESETS = {
+  full: baseDescribeSystemPrompt(
+    `Focus: FULL SCENE reconstruction (subject + action + background + style). Prioritize faithful reproduction over creativity.`
+  ),
+  background: baseDescribeSystemPrompt(
+    `Focus: BACKGROUND/ENVIRONMENT only. Minimize the subject description. Emphasize architecture, set dressing, spatial layout, materials, atmosphere, weather, and lighting.`
+  ),
+  person: baseDescribeSystemPrompt(
+    `Focus: SUBJECT/PERSON only. Minimize the background. Emphasize face, hair, expression, body, pose, clothing construction details, accessories, and skin/fabric texture fidelity.`
+  ),
+  style: baseDescribeSystemPrompt(
+    `Focus: STYLE & RENDERING extraction (style/medium/rendering pipeline). Still include minimal subject/background anchors, but allocate most detail budget to style and rendering traits so it can be reused.`
+  ),
 };
 
 function applyDescribePreset(presetId) {
