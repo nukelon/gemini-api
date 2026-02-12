@@ -42,10 +42,11 @@
           <button id="presetSave" type="button" class="btn secondary">添加预设</button>
           <button id="presetUpdate" type="button" class="btn secondary" disabled>更新预设</button>
           <button id="presetDelete" type="button" class="btn secondary" disabled>删除预设</button>
-          <button id="presetExport" type="button" class="btn secondary">批量导出预设</button>
+          <button id="presetExportCurrent" type="button" class="btn secondary" disabled>导出预设</button>
+          <button id="presetExportBatch" type="button" class="btn secondary">批量导出</button>
 
           <label class="btn secondary filebtn" title="导入预设（JSON）">
-            批量导入预设
+            导入预设
             <input id="presetImport" type="file" accept="application/json" />
           </label>
         </div>
@@ -256,6 +257,7 @@
         <div class="actions">
           <button id="runBtn" class="btn primary" type="submit">调用 API 生成</button>
           <button id="resetBtn" class="btn secondary" type="button">重置（不清 Host/Key）</button>
+          <button id="resetCurrentPresetBtn" class="btn secondary" type="button">重置为当前预设</button>
         </div>
 
         <div>
