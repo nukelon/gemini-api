@@ -106,7 +106,8 @@ const els = {
   presetSave: $id("presetSave"),
   presetUpdate: $id("presetUpdate"),
   presetDelete: $id("presetDelete"),
-  presetExport: $id("presetExport"),
+  presetExportCurrent: $id("presetExportCurrent"),
+  presetExportBatch: $id("presetExportBatch"),
   presetImport: $id("presetImport"),
 
   // describe mode
@@ -124,6 +125,7 @@ const els = {
   // actions
   runBtn: $id("runBtn"),
   resetBtn: $id("resetBtn"),
+  resetCurrentPresetBtn: $id("resetCurrentPresetBtn"),
   status: $id("status"),
 
   // result
@@ -788,6 +790,21 @@ function loadPresetsByTab(tab) {
 }
 function savePresetsByTab(tab, arr) { localStorage.setItem(presetKeyByTab(tab), JSON.stringify(arr)); }
 
+function isLockedDefaultDescPreset(preset) {
+  return !!(preset && preset.isDefault && LOCKED_DESC_PRESET_NAMES.has(preset.name));
+}
+
+function getExportablePresets(tab) {
+  const presets = loadPresetsByTab(tab);
+  if (tab !== "desc") return presets;
+  return presets.filter((p) => !isLockedDefaultDescPreset(p));
+}
+
+function findPresetByName(tab, name) {
+  if (!name) return null;
+  return loadPresetsByTab(tab).find((p) => p.name === name) || null;
+}
+
 function makePresetFromCurrentState(tab) {
   if (tab === "desc") {
     return {
@@ -865,10 +882,15 @@ function refreshPresetUI() {
   const activeName = localStorage.getItem(activePresetKeyByTab(tab)) || "";
   if (!els.presetSelect) return;
   els.presetSelect.innerHTML = "";
-  const empty = document.createElement("option");
-  empty.value = "";
-  empty.textContent = "（无预设）";
-  els.presetSelect.appendChild(empty);
+
+  const shouldShowEmpty = tab !== "desc";
+  if (shouldShowEmpty) {
+    const empty = document.createElement("option");
+    empty.value = "";
+    empty.textContent = "（无预设）";
+    els.presetSelect.appendChild(empty);
+  }
+
   for (const p of presets) {
     if (!p?.name) continue;
     const opt = document.createElement("option");
@@ -877,10 +899,25 @@ function refreshPresetUI() {
     if (p.name === activeName) opt.selected = true;
     els.presetSelect.appendChild(opt);
   }
-  const activePreset = presets.find((p) => p.name === activeName);
+
+  let activePreset = presets.find((p) => p.name === activeName) || null;
+  if (!activePreset && tab === "desc") {
+    const fallback = presets.find((p) => p.name === "全图") || presets[0] || null;
+    if (fallback) {
+      localStorage.setItem(activePresetKeyByTab(tab), fallback.name);
+      if (els.presetSelect) els.presetSelect.value = fallback.name;
+      activePreset = fallback;
+    }
+  }
+
   const hasActive = !!activePreset;
-  if (els.presetUpdate) els.presetUpdate.disabled = !hasActive;
-  if (els.presetDelete) els.presetDelete.disabled = !hasActive || (tab === "desc" && activePreset?.isDefault);
+  const canEditActive = hasActive && !(tab === "desc" && isLockedDefaultDescPreset(activePreset));
+  const exportableCount = getExportablePresets(tab).length;
+
+  if (els.presetUpdate) els.presetUpdate.disabled = !canEditActive;
+  if (els.presetDelete) els.presetDelete.disabled = !canEditActive;
+  if (els.presetExportCurrent) els.presetExportCurrent.disabled = !canEditActive;
+  if (els.presetExportBatch) els.presetExportBatch.disabled = exportableCount === 0;
 }
 
 function saveAsPreset() {
@@ -889,6 +926,7 @@ function saveAsPreset() {
   if (!name) return;
   const presets = loadPresetsByTab(tab);
   const idx = presets.findIndex((p) => p.name === name);
+  if (tab === "desc" && idx >= 0 && presets[idx]?.isDefault) { setStatus("默认四个预设不可更新。", true); return; }
   if (idx >= 0 && !confirm(`预设“${name}”已存在，是否覆盖？`)) return;
   const existing = idx >= 0 ? presets[idx] : null;
   const next = makePresetFromCurrentState(tab);
@@ -933,48 +971,104 @@ function deleteActivePreset() {
   refreshPresetUI();
 }
 
-function exportAllPresets() {
-  const payload = {
-    version: 4,
-    exportedAt: nowISO(),
-    genPresets: loadPresetsByTab("gen"),
-    descPresets: loadPresetsByTab("desc"),
-  };
+function downloadPresetPayload(payload, filename) {
   const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
-  a.download = `gemini3_all_presets_${timestampTag()}.json`;
+  a.download = filename;
   document.body.appendChild(a); a.click(); a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 5000);
-  setStatus("已批量导出所有模式预设。", true);
 }
 
-async function importAllPresetsFromFile(file) {
+function exportCurrentPreset() {
+  const tab = activeTab;
+  const name = els.presetSelect?.value || "";
+  const preset = findPresetByName(tab, name);
+  if (!preset) { setStatus("请先选择一个预设。", true); return; }
+  if (tab === "desc" && isLockedDefaultDescPreset(preset)) { setStatus("默认四个预设不可导出。", true); return; }
+  const payload = { version: 1, kind: "single", tab, exportedAt: nowISO(), preset };
+  downloadPresetPayload(payload, `gemini3_${tab}_preset_${timestampTag()}.json`);
+  setStatus(`已导出当前预设：${preset.name}`, true);
+}
+
+function exportBatchPresets() {
+  const tab = activeTab;
+  const exportable = getExportablePresets(tab);
+  if (exportable.length === 0) { setStatus("当前模式没有可批量导出的预设。", true); return; }
+  const payload = { version: 1, kind: "batch", tab, exportedAt: nowISO(), presets: exportable };
+  downloadPresetPayload(payload, `gemini3_${tab}_presets_${timestampTag()}.json`);
+  setStatus(`已批量导出当前模式预设（${exportable.length} 个）。`, true);
+}
+
+function normalizeImportedPreset(tab, p) {
+  if (!p || typeof p !== "object") return null;
+  const base = {
+    ...makePresetFromCurrentState(tab),
+    ...p,
+    kind: tab,
+    name: String(p.name || "").trim(),
+    createdAt: p.createdAt || nowISO(),
+    updatedAt: nowISO(),
+  };
+  if (!base.name) return null;
+  if (tab === "desc") {
+    const id = DESCRIBE_PRESETS[base.descPresetId] ? base.descPresetId : "full";
+    base.descPresetId = id;
+    base.isDefault = !!p.isDefault && LOCKED_DESC_PRESET_NAMES.has(base.name);
+  }
+  return base;
+}
+
+function ensureDefaultDescPresets(presets) {
+  const merged = [...presets];
+  const names = new Set(merged.map((x) => x.name));
+  for (const n of LOCKED_DESC_PRESET_NAMES) {
+    if (!names.has(n)) {
+      const id = n === "全图" ? "full" : n === "仅背景" ? "background" : n === "仅人物" ? "person" : "style";
+      merged.push({ name: n, descPresetId: id, mode: "form", isDefault: true, kind: "desc", createdAt: nowISO(), updatedAt: nowISO(), fields: { descPrompt: "", descSystemPrompt: DESCRIBE_PRESETS[id], temperature: "", mediaResolution: "", thinkingLevel: "" }, requestBodyJson: "" });
+    }
+  }
+  return merged;
+}
+
+async function importPresetsFromFile(file) {
   if (!file) return;
   let text = "";
   try { text = await file.text(); } catch (e) { setStatus(`读取导入文件失败：${e?.message || e}`, true); return; }
   let obj;
   try { obj = JSON.parse(text); } catch (e) { setStatus(`导入失败：JSON 解析错误：${e?.message || e}`, true); return; }
 
-  const incomingGen = Array.isArray(obj?.genPresets) ? obj.genPresets : [];
-  const incomingDesc = Array.isArray(obj?.descPresets) ? obj.descPresets : [];
-
-  if (incomingGen.length) savePresetsByTab("gen", incomingGen);
-  if (incomingDesc.length) {
-    const merged = [...incomingDesc];
-    const names = new Set(merged.map((x) => x.name));
-    for (const n of LOCKED_DESC_PRESET_NAMES) {
-      if (!names.has(n)) {
-        const id = n === "全图" ? "full" : n === "仅背景" ? "background" : n === "仅人物" ? "person" : "style";
-        merged.push({ name: n, descPresetId: id, mode: "form", isDefault: true, kind: "desc", createdAt: nowISO(), updatedAt: nowISO(), fields: { descPrompt: "", descSystemPrompt: DESCRIBE_PRESETS[id], temperature: "", mediaResolution: "", thinkingLevel: "" }, requestBodyJson: "" });
-      }
-    }
-    savePresetsByTab("desc", merged);
+  const tab = activeTab;
+  let incoming = [];
+  if (obj?.kind === "single" && obj?.preset) incoming = [obj.preset];
+  else if (obj?.kind === "batch" && Array.isArray(obj?.presets)) incoming = obj.presets;
+  else if (Array.isArray(obj?.presets)) incoming = obj.presets;
+  else if (obj?.preset) incoming = [obj.preset];
+  else if (Array.isArray(obj?.genPresets) || Array.isArray(obj?.descPresets)) {
+    incoming = tab === "desc" ? (obj.descPresets || []) : (obj.genPresets || []);
   }
 
+  if (!incoming.length) { setStatus("导入失败：未识别到可导入的预设。", true); return; }
+
+  const existing = loadPresetsByTab(tab);
+  const map = new Map(existing.map((p) => [p.name, p]));
+  let importedCount = 0;
+  for (const raw of incoming) {
+    const normalized = normalizeImportedPreset(tab, raw);
+    if (!normalized) continue;
+    if (tab === "desc" && LOCKED_DESC_PRESET_NAMES.has(normalized.name)) continue;
+    const old = map.get(normalized.name);
+    if (old?.isDefault && tab === "desc") continue;
+    map.set(normalized.name, { ...old, ...normalized, createdAt: old?.createdAt || normalized.createdAt });
+    importedCount++;
+  }
+
+  let next = Array.from(map.values());
+  if (tab === "desc") next = ensureDefaultDescPresets(next);
+  savePresetsByTab(tab, next);
   refreshPresetUI();
-  setStatus("已批量导入预设。", true);
+  setStatus(importedCount > 0 ? `已导入 ${importedCount} 个预设。` : "文件可识别，但没有可导入的新预设。", true);
 }
 
 // ====================== Request building ======================
@@ -1285,7 +1379,7 @@ async function run() {
 }
 
 // ====================== reset ======================
-function resetNonFixedFields() {
+function resetAllFieldsToBlankState() {
   // shared
   clearAllImages();
 
@@ -1316,7 +1410,19 @@ function resetNonFixedFields() {
   persistBase();
 }
 
-// ====================== wiring ======================
+function resetToCurrentPresetOrBlank() {
+  const tab = activeTab;
+  const name = localStorage.getItem(activePresetKeyByTab(tab)) || "";
+  const p = findPresetByName(tab, name);
+  if (p) {
+    applyPreset(p, tab);
+    setStatus(`已重置为当前预设：${p.name}`, true);
+    return;
+  }
+  resetAllFieldsToBlankState();
+}
+
+// ====================== wiring ====================== 
 function wireEvents() {
   if (!els.form) {
     setStatus("初始化失败：未找到 form 元素。请确认 index.html 中 <form id=\"form\"> 存在。", true);
@@ -1421,7 +1527,7 @@ function wireEvents() {
     finally { if (els.runBtn) els.runBtn.disabled = false; }
   });
 
-  els.resetBtn?.addEventListener("click", resetNonFixedFields);
+  els.resetBtn?.addEventListener("click", resetAllFieldsToBlankState);
 
   els.copyCurl?.addEventListener("click", async () => {
     if (!lastRequest) return;
@@ -1456,13 +1562,16 @@ function wireEvents() {
   els.presetSave?.addEventListener("click", saveAsPreset);
   els.presetUpdate?.addEventListener("click", updateActivePreset);
   els.presetDelete?.addEventListener("click", deleteActivePreset);
-  els.presetExport?.addEventListener("click", exportAllPresets);
+  els.presetExportCurrent?.addEventListener("click", exportCurrentPreset);
+  els.presetExportBatch?.addEventListener("click", exportBatchPresets);
 
   els.presetImport?.addEventListener("change", async () => {
     const f = els.presetImport.files?.[0];
     els.presetImport.value = "";
-    await importAllPresetsFromFile(f);
+    await importPresetsFromFile(f);
   });
+
+  els.resetCurrentPresetBtn?.addEventListener("click", resetToCurrentPresetOrBlank);
 
   // iOS background
   document.addEventListener("visibilitychange", async () => {
