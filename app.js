@@ -655,7 +655,7 @@ function applyJsonToFormBestEffort() {
 
 // ====================== Describe presets (system prompt templates) ======================
 // 要求：英文、只输出提示词本体、不输出负面提示词；按预设范围描述；类 Danbooru 标签可选
-function baseDescribeSystemPrompt({ focusRule, scopeRule, formatBlock }) {
+function baseDescribeSystemPrompt({ focusRule, scopeRule, detailRules, formatBlock }) {
   return `You are an Image-to-Prompt reverse-engineering assistant.
 Your task: analyze one or more reference images and output ONE high-quality English prompt for the image generation model "${MODEL_IMAGE}".
 
@@ -665,13 +665,20 @@ OUTPUT RULES:
 - Do not output any negative prompt.
 - English only.
 
+IDENTITY / NAMING SAFETY:
+- Unless you have high confidence from explicit visual evidence, do NOT name any character/person.
+- Prefer neutral descriptors like "a young woman", "a man", "an armored character", "a child", "a humanoid figure" when certainty is not high.
+- Never guess franchise/IP names from weak resemblance.
+
 QUALITY RULES:
 - Be concrete, visual, measurable, and reproducible; avoid vague wording.
 - Preserve faithful visual reconstruction rather than adding creative content.
 - Keep dense, high-granularity detail inside the allowed scope.
 - Use precise nouns/adjectives, quantifiable cues, and clear spatial/material relationships.
-- For style/rendering details when in scope, be exceptionally specific: medium traits, line/edge behavior, shape language, shading model, color response, contrast curve, tone mapping, texture fidelity, grain/noise pattern, post-processing artifacts, and overall rendering pipeline feel.
 - ${scopeRule}
+
+DETAIL CHECKLIST:
+${detailRules}
 
 TAGS POLICY (optional):
 - You may add a short "Tags:" line in Danbooru-like style only when it clearly improves prompt usability.
@@ -683,69 +690,99 @@ ${formatBlock}`.trim();
 
 const DESCRIBE_PRESETS = {
   full: baseDescribeSystemPrompt({
-    focusRule: `Focus = FULL SCENE: describe all major visual dimensions for faithful reconstruction.`,
-    scopeRule: `Include subject, action/pose, clothing/accessories, environment, lighting, camera/composition, and very detailed style/rendering traits.`,
-    formatBlock: `[Subject]
+    focusRule: `Focus = FULL IMAGE: cover subject, scene, and visual rendering comprehensively for faithful reconstruction.`,
+    scopeRule: `Include people/subjects, scene structure, materials, lighting, composition, and style/rendering texture in one coherent prompt.`,
+    detailRules: `- Subject: identity confidence level, age group, gender presentation, body type, face traits, hair, expression, pose, hand gestures, interaction.
+- Clothing/Props: garment types, silhouette, cut, fabric behavior, accessories, held objects, logos/symbols if clearly visible.
+- Scene: location type, architecture/terrain, foreground-midground-background layering, key props, spatial depth.
+- Light/Atmosphere: light sources, direction, hardness/softness, color temperature, shadow behavior, haze/fog/particles, weather/time cues.
+- Camera/Composition: shot distance, lens feel, perspective, framing, angle, focal emphasis, depth of field.
+- Style/Rendering: line quality, edge handling, shading model, color palette, contrast curve, texture fidelity, grain/noise, post-processing signature.`,
+    formatBlock: `[Subject / Characters]
 ...
-[Action / Pose]
+[Clothing / Props]
 ...
-[Clothing / Accessories]
+[Scene / Environment]
 ...
-[Background / Environment]
-...
-[Lighting]
+[Lighting / Atmosphere]
 ...
 [Camera / Composition]
 ...
-[Style & Rendering]
+[Style / Rendering]
 ...
 [Quality / Fidelity]
 ...`
   }),
   background: baseDescribeSystemPrompt({
-    focusRule: `Focus = BACKGROUND / ENVIRONMENT ONLY: describe only environment-domain information and omit every non-environment detail.`,
-    scopeRule: `Do not describe person identity, pose, clothing, or standalone style-pipeline analysis unless directly visible as environment properties.`,
-    formatBlock: `[Background / Environment]
+    focusRule: `Focus = SCENE ONLY: describe environment and spatial composition only.`,
+    scopeRule: `Do not include person/character details, and do not include standalone style/texture/rendering pipeline analysis.`,
+    detailRules: `- Scene type: indoor/outdoor, setting category, function, era cues.
+- Layout: structure, depth layers, vanishing direction, path/road/water flow, object placement relationships.
+- Architecture/Nature: building forms, terrain, vegetation, skyline, landmarks.
+- Materials: wall/floor/ground/surface material categories and observable physical properties.
+- Lighting/Atmosphere: source direction/intensity, ambient feel, weather, haze, volumetric effects.
+- Composition constraints: horizon position, main visual anchor, emptiness/density distribution.
+- IMPORTANT: even if the original image appears anime/stylized, do not add style/brushwork/rendering descriptors in this preset.`,
+    formatBlock: `[Scene Type]
 ...
-[Layout / Architecture / Props]
+[Spatial Layout]
 ...
-[Materials / Textures]
+[Architecture / Nature / Props]
+...
+[Materials]
 ...
 [Lighting / Atmosphere / Weather]
 ...
-[Camera / Framing (environment only)]
+[Composition Anchors]
 ...
 [Quality / Fidelity]
 ...`
   }),
   person: baseDescribeSystemPrompt({
-    focusRule: `Focus = SUBJECT / PERSON ONLY: describe only person-domain information and omit every non-person detail.`,
-    scopeRule: `Do not describe background world-building or standalone style-pipeline analysis; keep all details person-centric.`,
-    formatBlock: `[Subject Identity / Appearance]
+    focusRule: `Focus = PERSON ONLY: describe people/characters only.`,
+    scopeRule: `Do not include background/environment detail, and do not include standalone style/texture/rendering pipeline analysis.`,
+    detailRules: `- Identity confidence: name only when highly certain; otherwise use neutral role descriptors.
+- Face: facial structure, eye shape, iris color, eyebrows, nose, lips, expression micro-details.
+- Hair: length, style, parting, volume, color gradients, highlights.
+- Body/Pose: posture, limb orientation, gesture, action state, body proportion cues.
+- Clothing/Accessories: outfit layers, materials, patterns, jewelry, equipment, emblem text if clearly legible.
+- Surface details: skin marks, makeup, wrinkles/folds, fabric tension/compression points.
+- IMPORTANT: even if the original image appears anime/stylized, do not add style/brushwork/rendering descriptors in this preset.`,
+    formatBlock: `[Identity Confidence / Role]
 ...
-[Face / Hair / Expression]
+[Face / Expression]
+...
+[Hair]
 ...
 [Body / Pose / Gesture]
 ...
 [Clothing / Accessories]
 ...
-[Surface Detail (skin / fabric / small features)]
+[Surface Details]
 ...
 [Quality / Fidelity]
 ...`
   }),
   style: baseDescribeSystemPrompt({
-    focusRule: `Focus = STYLE & RENDERING ONLY: describe only reusable style/rendering characteristics and omit semantic scene/subject content.`,
-    scopeRule: `Do not describe subject/background semantics; provide deep, reusable style/medium/rendering/post-processing characteristics only.`,
-    formatBlock: `[Style Family / Medium]
+    focusRule: `Focus = STYLE ONLY: describe reusable visual style and rendering behavior only.`,
+    scopeRule: `Do not include subject identity, character naming, or scene semantics.`,
+    detailRules: `- Medium family: illustration, anime cel, oil-like, 3D render, photoreal, etc.
+- Line/Edge language: line weight variance, contour closure, edge softness, detail density.
+- Shape/shading behavior: simplification vs realism, highlight rolloff, shadow transition hardness.
+- Color behavior: palette bias, saturation profile, hue relationships, contrast strategy.
+- Texture/post process: grain, bloom, chromatic aberration, halation, sharpening, compression artifacts.
+- Overall pipeline signature: how the image looks produced (clean digital paint, cinematic DI, toon renderer, etc.).`,
+    formatBlock: `[Medium Family]
 ...
 [Line / Edge / Shape Language]
 ...
 [Shading / Rendering Behavior]
 ...
-[Color / Contrast / Tone Mapping]
+[Color / Contrast Strategy]
 ...
-[Texture / Grain / Post-processing]
+[Texture / Post-processing]
+...
+[Pipeline Signature]
 ...
 [Quality / Fidelity]
 ...`
@@ -757,12 +794,12 @@ function applyDescribePreset(presetId) {
   if (els.descSystemPrompt) els.descSystemPrompt.value = DESCRIBE_PRESETS[pid];
   if (els.descPreset) els.descPreset.value = pid;
   persistBase();
-  setStatus(`已应用反推预设：${pid === "full" ? "全图" : pid === "background" ? "仅背景" : pid === "person" ? "仅人物" : "仅风格/画风"}`, true);
+  setStatus(`已应用反推预设：${pid === "full" ? "全图" : pid === "background" ? "仅场景" : pid === "person" ? "仅人物" : "仅画风"}`, true);
   setTimeout(() => setStatus("", false), 900);
 }
 
 // ====================== presets ======================
-const LOCKED_DESC_PRESET_NAMES = new Set(["全图", "仅背景", "仅人物", "仅风格/画风"]);
+const LOCKED_DESC_PRESET_NAMES = new Set(["全图", "仅场景", "仅人物", "仅画风"]);
 
 function seedDefaultDescPresets() {
   const existing = loadPresetsByTab("desc");
@@ -770,9 +807,9 @@ function seedDefaultDescPresets() {
   const now = nowISO();
   const defaults = [
     { name: "全图", descPresetId: "full", fields: { descPrompt: "", descSystemPrompt: DESCRIBE_PRESETS.full, temperature: "", mediaResolution: "", thinkingLevel: "" } },
-    { name: "仅背景", descPresetId: "background", fields: { descPrompt: "", descSystemPrompt: DESCRIBE_PRESETS.background, temperature: "", mediaResolution: "", thinkingLevel: "" } },
+    { name: "仅场景", descPresetId: "background", fields: { descPrompt: "", descSystemPrompt: DESCRIBE_PRESETS.background, temperature: "", mediaResolution: "", thinkingLevel: "" } },
     { name: "仅人物", descPresetId: "person", fields: { descPrompt: "", descSystemPrompt: DESCRIBE_PRESETS.person, temperature: "", mediaResolution: "", thinkingLevel: "" } },
-    { name: "仅风格/画风", descPresetId: "style", fields: { descPrompt: "", descSystemPrompt: DESCRIBE_PRESETS.style, temperature: "", mediaResolution: "", thinkingLevel: "" } },
+    { name: "仅画风", descPresetId: "style", fields: { descPrompt: "", descSystemPrompt: DESCRIBE_PRESETS.style, temperature: "", mediaResolution: "", thinkingLevel: "" } },
   ].map((x) => ({ ...x, createdAt: now, updatedAt: now, mode: "form", isDefault: true, kind: "desc" }));
   localStorage.setItem(storageKeys.descPresets, JSON.stringify(defaults));
 }
@@ -1025,7 +1062,7 @@ function ensureDefaultDescPresets(presets) {
   const names = new Set(merged.map((x) => x.name));
   for (const n of LOCKED_DESC_PRESET_NAMES) {
     if (!names.has(n)) {
-      const id = n === "全图" ? "full" : n === "仅背景" ? "background" : n === "仅人物" ? "person" : "style";
+      const id = n === "全图" ? "full" : n === "仅场景" ? "background" : n === "仅人物" ? "person" : "style";
       merged.push({ name: n, descPresetId: id, mode: "form", isDefault: true, kind: "desc", createdAt: nowISO(), updatedAt: nowISO(), fields: { descPrompt: "", descSystemPrompt: DESCRIBE_PRESETS[id], temperature: "", mediaResolution: "", thinkingLevel: "" }, requestBodyJson: "" });
     }
   }
