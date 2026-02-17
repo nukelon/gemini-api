@@ -117,6 +117,7 @@ const els = {
   descTemperature: $id("descTemperature"),
   descMediaResolution: $id("descMediaResolution"),
   descThinkingLevel: $id("descThinkingLevel"),
+  descStructuredOutputs: $id("descStructuredOutputs"),
   descRequestBodyJson: $id("descRequestBodyJson"),
   descJsonFormat: $id("descJsonFormat"),
   descJsonFromForm: $id("descJsonFromForm"),
@@ -182,6 +183,7 @@ const storageKeys = {
   descTemperature: "g3_desc_temperature",
   descMediaResolution: "g3_desc_media_resolution",
   descThinkingLevel: "g3_desc_thinking_level",
+  descStructuredOutputs: "g3_desc_structured_outputs",
 };
 
 // ====================== state ======================
@@ -366,6 +368,7 @@ function persistBase() {
     localStorage.setItem(storageKeys.descTemperature, els.descTemperature?.value || "");
     localStorage.setItem(storageKeys.descMediaResolution, els.descMediaResolution?.value || "");
     localStorage.setItem(storageKeys.descThinkingLevel, els.descThinkingLevel?.value || "");
+    localStorage.setItem(storageKeys.descStructuredOutputs, String(!!els.descStructuredOutputs?.checked));
 
     if (els.rememberKey?.checked) {
       localStorage.setItem(storageKeys.apiKey, els.apiKey?.value || "");
@@ -402,6 +405,7 @@ function restoreBase() {
     if (els.descTemperature) els.descTemperature.value = localStorage.getItem(storageKeys.descTemperature) || "";
     if (els.descMediaResolution) els.descMediaResolution.value = localStorage.getItem(storageKeys.descMediaResolution) || "";
     if (els.descThinkingLevel) els.descThinkingLevel.value = localStorage.getItem(storageKeys.descThinkingLevel) || "";
+    if (els.descStructuredOutputs) els.descStructuredOutputs.checked = (localStorage.getItem(storageKeys.descStructuredOutputs) || "false") === "true";
 
     const savedKey = localStorage.getItem(storageKeys.apiKey) || "";
     if (els.rememberKey?.checked && savedKey && els.apiKey) els.apiKey.value = savedKey;
@@ -439,7 +443,10 @@ function setActiveTab(tab) {
   if (activeTab === "desc") {
     const pid = els.descPreset?.value || "full";
     if (els.descSystemPrompt && !els.descSystemPrompt.value.trim()) {
-      els.descSystemPrompt.value = DESCRIBE_PRESETS[pid] || DESCRIBE_PRESETS.full;
+      els.descSystemPrompt.value = DESCRIBE_SYSTEM_PROMPT_BASE;
+    }
+    if (els.descPrompt && !els.descPrompt.value.trim()) {
+      els.descPrompt.value = DESCRIBE_PROMPT_PRESETS[pid] || DESCRIBE_PROMPT_PRESETS.full;
     }
   }
 
@@ -493,6 +500,7 @@ function setDescUiMode(mode) {
   if (els.descJsonModeWrap) els.descJsonModeWrap.classList.toggle("hidden", descUiMode !== "json");
 
   if (activeTab === "desc" && descUiMode === "json" && els.descRequestBodyJson) {
+    if (els.descPrompt && !String(els.descPrompt.value || "").trim()) els.descPrompt.value = EMPTY_DESC_PROMPT;
     try {
       const body = buildDescribeBodyFromForm();
       els.descRequestBodyJson.value = JSON.stringify(body, null, 2);
@@ -571,6 +579,9 @@ function applyDescJsonToFormBestEffort() {
   if (typeof gc.mediaResolution === "string" && els.descMediaResolution) els.descMediaResolution.value = gc.mediaResolution;
   if (typeof gc?.thinkingConfig?.thinkingLevel === "string" && els.descThinkingLevel) {
     els.descThinkingLevel.value = gc.thinkingConfig.thinkingLevel;
+  }
+  if (els.descStructuredOutputs) {
+    els.descStructuredOutputs.checked = gc.responseMimeType === "application/json" && !!gc.responseJsonSchema;
   }
 
   persistBase();
@@ -653,145 +664,117 @@ function applyJsonToFormBestEffort() {
   persistBase();
 }
 
-// ====================== Describe presets (system prompt templates) ======================
-// 要求：英文、只输出提示词本体、不输出负面提示词；按预设范围描述；类 Danbooru 标签可选
-function baseDescribeSystemPrompt({ focusRule, scopeRule, detailRules, formatBlock }) {
-  return `You are an Image-to-Prompt reverse-engineering assistant.
-Your task: analyze one or more reference images and output ONE high-quality English prompt for the image generation model "${MODEL_IMAGE}".
+const EMPTY_DESC_PROMPT = " ";
 
-OUTPUT RULES:
-- ${focusRule}
-- Output only the prompt body. No explanations, no prefacing text, no meta commentary.
-- Do not output any negative prompt.
-- English only.
+const DESCRIBE_SYSTEM_PROMPT_BASE = `You are an Image-to-Prompt reverse-engineering assistant.
+Your task: analyze one or more reference images and produce ONE high-quality English prompt for the image generation model "${MODEL_IMAGE}".
 
-IDENTITY / NAMING SAFETY:
-- Unless you have high confidence from explicit visual evidence, do NOT name any character/person.
-- Prefer neutral descriptors like "a young woman", "a man", "an armored character", "a child", "a humanoid figure" when certainty is not high.
-- Never guess franchise/IP names from weak resemblance.
+Core priorities:
+- Prioritize extremely rich, high-granularity visual details with faithful reconstruction.
+- Facial expression details are critical: include eye focus, eyelid state, brow tension, lip shape, jaw tension, and subtle emotion micro-cues.
+- Motion details and direction are critical: include body orientation, limb direction, weight transfer, gesture trajectory, and interaction directionality.
+- Style description is critical: include medium, line/edge behavior, shading logic, color strategy, texture/post-processing cues, and rendering signature.
+- Use extensive natural language and keep descriptions long, concrete, and specific.
 
-QUALITY RULES:
-- Be concrete, visual, measurable, and reproducible; avoid vague wording.
-- Preserve faithful visual reconstruction rather than adding creative content.
-- Keep dense, high-granularity detail inside the allowed scope.
-- Use precise nouns/adjectives, quantifiable cues, and clear spatial/material relationships.
-- ${scopeRule}
+Output rules:
+- Output only English prompt content.
+- Do not output negative prompts.
+- No explanations, no prefacing text, no meta commentary.
+- Keep output formatted with clear section structure, but do not include sample templates or example blocks.
 
-DETAIL CHECKLIST:
-${detailRules}
+Identity safety:
+- Name specific characters/persons only when confidence is very high from explicit visual evidence.
+- Otherwise use neutral role descriptors and never guess IP/franchise names from weak resemblance.`.trim();
 
-TAGS POLICY (optional):
-- You may add a short "Tags:" line in Danbooru-like style only when it clearly improves prompt usability.
-- Tags are optional, and never a replacement for detailed natural-language description.
-
-FORMAT:
-${formatBlock}`.trim();
+function normalizeDescPromptInput(raw) {
+  return String(raw ?? "").trim() ? String(raw) : EMPTY_DESC_PROMPT;
 }
 
-const DESCRIBE_PRESETS = {
-  full: baseDescribeSystemPrompt({
-    focusRule: `Focus = FULL IMAGE: cover subject, scene, and visual rendering comprehensively for faithful reconstruction.`,
+const DESC_STRUCTURED_OUTPUT_SCHEMA = {
+  type: "OBJECT",
+  required: ["prompt"],
+  properties: {
+    prompt: {
+      type: "STRING",
+      description: "A fully formatted, high-detail English prompt body ready for image generation."
+    }
+  },
+  propertyOrdering: ["prompt"]
+};
+
+// ====================== Describe presets (prompt templates) ======================
+function baseDescribePromptTemplate({ focusRule, scopeRule, detailRules }) {
+  return `Task: Reverse-engineer this image into one production-grade English generation prompt for model "${MODEL_IMAGE}".
+
+Scope:
+- ${focusRule}
+- ${scopeRule}
+
+Quality requirements:
+- Preserve faithful visual reconstruction and avoid creative additions not supported by the image.
+- Use long-form, detailed, natural language with dense, concrete and measurable visual cues.
+- Explicitly describe facial micro-expressions, action trajectory/direction, and style/rendering behavior whenever visible.
+
+Identity / Naming safety:
+- Name characters/persons only with high confidence from explicit visual evidence.
+- Otherwise use neutral descriptors (for example: a young woman, a man, an armored character).
+- Never infer franchise/IP names from weak resemblance.
+
+Detail checklist:
+${detailRules}
+
+Output requirement:
+- Output in a clearly formatted multi-section structure.
+- Output prompt content only; no explanations and no negative prompt.`.trim();
+}
+
+const DESCRIBE_PROMPT_PRESETS = {
+  full: baseDescribePromptTemplate({
+    focusRule: `Focus = FULL IMAGE: cover subject, scene, and visual rendering comprehensively.`,
     scopeRule: `Include people/subjects, scene structure, materials, lighting, composition, and style/rendering texture in one coherent prompt.`,
     detailRules: `- Subject: identity confidence level, age group, gender presentation, body type, face traits, hair, expression, pose, hand gestures, interaction.
 - Clothing/Props: garment types, silhouette, cut, fabric behavior, accessories, held objects, logos/symbols if clearly visible.
 - Scene: location type, architecture/terrain, foreground-midground-background layering, key props, spatial depth.
 - Light/Atmosphere: light sources, direction, hardness/softness, color temperature, shadow behavior, haze/fog/particles, weather/time cues.
 - Camera/Composition: shot distance, lens feel, perspective, framing, angle, focal emphasis, depth of field.
-- Style/Rendering: line quality, edge handling, shading model, color palette, contrast curve, texture fidelity, grain/noise, post-processing signature.`,
-    formatBlock: `[Subject / Characters]
-...
-[Clothing / Props]
-...
-[Scene / Environment]
-...
-[Lighting / Atmosphere]
-...
-[Camera / Composition]
-...
-[Style / Rendering]
-...
-[Quality / Fidelity]
-...`
+- Style/Rendering: line quality, edge handling, shading model, color palette, contrast curve, texture fidelity, grain/noise, post-processing signature.`
   }),
-  background: baseDescribeSystemPrompt({
+  background: baseDescribePromptTemplate({
     focusRule: `Focus = SCENE ONLY: describe environment and spatial composition only.`,
-    scopeRule: `Do not include person/character details, and do not include standalone style/texture/rendering pipeline analysis.`,
+    scopeRule: `Do not include person/character details or naming.`,
     detailRules: `- Scene type: indoor/outdoor, setting category, function, era cues.
 - Layout: structure, depth layers, vanishing direction, path/road/water flow, object placement relationships.
 - Architecture/Nature: building forms, terrain, vegetation, skyline, landmarks.
 - Materials: wall/floor/ground/surface material categories and observable physical properties.
 - Lighting/Atmosphere: source direction/intensity, ambient feel, weather, haze, volumetric effects.
-- Composition constraints: horizon position, main visual anchor, emptiness/density distribution.
-- IMPORTANT: even if the original image appears anime/stylized, do not add style/brushwork/rendering descriptors in this preset.`,
-    formatBlock: `[Scene Type]
-...
-[Spatial Layout]
-...
-[Architecture / Nature / Props]
-...
-[Materials]
-...
-[Lighting / Atmosphere / Weather]
-...
-[Composition Anchors]
-...
-[Quality / Fidelity]
-...`
+- Composition constraints: horizon position, main visual anchor, emptiness/density distribution.`
   }),
-  person: baseDescribeSystemPrompt({
+  person: baseDescribePromptTemplate({
     focusRule: `Focus = PERSON ONLY: describe people/characters only.`,
-    scopeRule: `Do not include background/environment detail, and do not include standalone style/texture/rendering pipeline analysis.`,
+    scopeRule: `Do not include background/environment details that are not directly required to explain the person pose/action.`,
     detailRules: `- Identity confidence: name only when highly certain; otherwise use neutral role descriptors.
-- Face: facial structure, eye shape, iris color, eyebrows, nose, lips, expression micro-details.
+- Face: facial structure, eye shape, iris color, eyebrows, nose, lips, expression micro-details and emotional state.
 - Hair: length, style, parting, volume, color gradients, highlights.
-- Body/Pose: posture, limb orientation, gesture, action state, body proportion cues.
+- Body/Pose: posture, limb orientation, gesture, action state, body proportion cues, motion direction and force transfer.
 - Clothing/Accessories: outfit layers, materials, patterns, jewelry, equipment, emblem text if clearly legible.
-- Surface details: skin marks, makeup, wrinkles/folds, fabric tension/compression points.
-- IMPORTANT: even if the original image appears anime/stylized, do not add style/brushwork/rendering descriptors in this preset.`,
-    formatBlock: `[Identity Confidence / Role]
-...
-[Face / Expression]
-...
-[Hair]
-...
-[Body / Pose / Gesture]
-...
-[Clothing / Accessories]
-...
-[Surface Details]
-...
-[Quality / Fidelity]
-...`
+- Surface details: skin marks, makeup, wrinkles/folds, fabric tension/compression points.`
   }),
-  style: baseDescribeSystemPrompt({
+  style: baseDescribePromptTemplate({
     focusRule: `Focus = STYLE ONLY: describe reusable visual style and rendering behavior only.`,
     scopeRule: `Do not include subject identity, character naming, or scene semantics.`,
     detailRules: `- Medium family: illustration, anime cel, oil-like, 3D render, photoreal, etc.
 - Line/Edge language: line weight variance, contour closure, edge softness, detail density.
-- Shape/shading behavior: simplification vs realism, highlight rolloff, shadow transition hardness.
+- Shape/Shading behavior: simplification vs realism, highlight rolloff, shadow transition hardness.
 - Color behavior: palette bias, saturation profile, hue relationships, contrast strategy.
-- Texture/post process: grain, bloom, chromatic aberration, halation, sharpening, compression artifacts.
-- Overall pipeline signature: how the image looks produced (clean digital paint, cinematic DI, toon renderer, etc.).`,
-    formatBlock: `[Medium Family]
-...
-[Line / Edge / Shape Language]
-...
-[Shading / Rendering Behavior]
-...
-[Color / Contrast Strategy]
-...
-[Texture / Post-processing]
-...
-[Pipeline Signature]
-...
-[Quality / Fidelity]
-...`
+- Texture/Post process: grain, bloom, chromatic aberration, halation, sharpening, compression artifacts.
+- Overall pipeline signature: how the image appears to be produced (digital paint, cinematic DI, toon renderer, etc.).`
   }),
 };
 
 function applyDescribePreset(presetId) {
-  const pid = DESCRIBE_PRESETS[presetId] ? presetId : "full";
-  if (els.descSystemPrompt) els.descSystemPrompt.value = DESCRIBE_PRESETS[pid];
+  const pid = DESCRIBE_PROMPT_PRESETS[presetId] ? presetId : "full";
+  if (els.descPrompt) els.descPrompt.value = DESCRIBE_PROMPT_PRESETS[pid];
+  if (els.descSystemPrompt) els.descSystemPrompt.value = DESCRIBE_SYSTEM_PROMPT_BASE;
   if (els.descPreset) els.descPreset.value = pid;
   persistBase();
   setStatus(`已应用反推预设：${pid === "full" ? "全图" : pid === "background" ? "仅场景" : pid === "person" ? "仅人物" : "仅画风"}`, true);
@@ -806,10 +789,10 @@ function seedDefaultDescPresets() {
   if (existing.length) return;
   const now = nowISO();
   const defaults = [
-    { name: "全图", descPresetId: "full", fields: { descPrompt: "", descSystemPrompt: DESCRIBE_PRESETS.full, temperature: "", mediaResolution: "", thinkingLevel: "" } },
-    { name: "仅场景", descPresetId: "background", fields: { descPrompt: "", descSystemPrompt: DESCRIBE_PRESETS.background, temperature: "", mediaResolution: "", thinkingLevel: "" } },
-    { name: "仅人物", descPresetId: "person", fields: { descPrompt: "", descSystemPrompt: DESCRIBE_PRESETS.person, temperature: "", mediaResolution: "", thinkingLevel: "" } },
-    { name: "仅画风", descPresetId: "style", fields: { descPrompt: "", descSystemPrompt: DESCRIBE_PRESETS.style, temperature: "", mediaResolution: "", thinkingLevel: "" } },
+    { name: "全图", descPresetId: "full", fields: { descPrompt: DESCRIBE_PROMPT_PRESETS.full, descSystemPrompt: DESCRIBE_SYSTEM_PROMPT_BASE, temperature: "", mediaResolution: "", thinkingLevel: "", structuredOutputs: false } },
+    { name: "仅场景", descPresetId: "background", fields: { descPrompt: DESCRIBE_PROMPT_PRESETS.background, descSystemPrompt: DESCRIBE_SYSTEM_PROMPT_BASE, temperature: "", mediaResolution: "", thinkingLevel: "", structuredOutputs: false } },
+    { name: "仅人物", descPresetId: "person", fields: { descPrompt: DESCRIBE_PROMPT_PRESETS.person, descSystemPrompt: DESCRIBE_SYSTEM_PROMPT_BASE, temperature: "", mediaResolution: "", thinkingLevel: "", structuredOutputs: false } },
+    { name: "仅画风", descPresetId: "style", fields: { descPrompt: DESCRIBE_PROMPT_PRESETS.style, descSystemPrompt: DESCRIBE_SYSTEM_PROMPT_BASE, temperature: "", mediaResolution: "", thinkingLevel: "", structuredOutputs: false } },
   ].map((x) => ({ ...x, createdAt: now, updatedAt: now, mode: "form", isDefault: true, kind: "desc" }));
   localStorage.setItem(storageKeys.descPresets, JSON.stringify(defaults));
 }
@@ -857,6 +840,7 @@ function makePresetFromCurrentState(tab) {
         temperature: els.descTemperature?.value || "",
         mediaResolution: els.descMediaResolution?.value || "",
         thinkingLevel: els.descThinkingLevel?.value || "",
+        structuredOutputs: !!els.descStructuredOutputs?.checked,
       },
       requestBodyJson: els.descRequestBodyJson?.value || "",
       isDefault: false,
@@ -891,6 +875,7 @@ function applyPreset(preset, tab) {
     if (els.descTemperature) els.descTemperature.value = f.temperature ?? "";
     if (els.descMediaResolution) els.descMediaResolution.value = f.mediaResolution ?? "";
     if (els.descThinkingLevel) els.descThinkingLevel.value = f.thinkingLevel ?? "";
+    if (els.descStructuredOutputs) els.descStructuredOutputs.checked = !!f.structuredOutputs;
     if (typeof preset.requestBodyJson === "string" && els.descRequestBodyJson) els.descRequestBodyJson.value = preset.requestBodyJson;
     persistBase();
     setStatus(`已应用反推预设：${preset.name}`, true);
@@ -1050,9 +1035,15 @@ function normalizeImportedPreset(tab, p) {
   };
   if (!base.name) return null;
   if (tab === "desc") {
-    const id = DESCRIBE_PRESETS[base.descPresetId] ? base.descPresetId : "full";
+    const id = DESCRIBE_PROMPT_PRESETS[base.descPresetId] ? base.descPresetId : "full";
     base.descPresetId = id;
     base.isDefault = !!p.isDefault && LOCKED_DESC_PRESET_NAMES.has(base.name);
+    base.fields = {
+      ...base.fields,
+      descPrompt: String(base.fields?.descPrompt ?? DESCRIBE_PROMPT_PRESETS[id]),
+      descSystemPrompt: String(base.fields?.descSystemPrompt ?? DESCRIBE_SYSTEM_PROMPT_BASE),
+      structuredOutputs: !!base.fields?.structuredOutputs,
+    };
   }
   return base;
 }
@@ -1063,7 +1054,7 @@ function ensureDefaultDescPresets(presets) {
   for (const n of LOCKED_DESC_PRESET_NAMES) {
     if (!names.has(n)) {
       const id = n === "全图" ? "full" : n === "仅场景" ? "background" : n === "仅人物" ? "person" : "style";
-      merged.push({ name: n, descPresetId: id, mode: "form", isDefault: true, kind: "desc", createdAt: nowISO(), updatedAt: nowISO(), fields: { descPrompt: "", descSystemPrompt: DESCRIBE_PRESETS[id], temperature: "", mediaResolution: "", thinkingLevel: "" }, requestBodyJson: "" });
+      merged.push({ name: n, descPresetId: id, mode: "form", isDefault: true, kind: "desc", createdAt: nowISO(), updatedAt: nowISO(), fields: { descPrompt: DESCRIBE_PROMPT_PRESETS[id], descSystemPrompt: DESCRIBE_SYSTEM_PROMPT_BASE, temperature: "", mediaResolution: "", thinkingLevel: "", structuredOutputs: false }, requestBodyJson: "" });
     }
   }
   return merged;
@@ -1168,10 +1159,15 @@ function buildDescribeBodyFromForm() {
   }
 
   const sys = (els.descSystemPrompt?.value || "").trim();
-  const userPrompt = (els.descPrompt?.value || "");
+  const userPrompt = normalizeDescPromptInput(els.descPrompt?.value || "");
   const temperature = safeNumberOrEmpty(els.descTemperature?.value);
   const mediaResolution = els.descMediaResolution?.value || "";
   const thinkingLevel = els.descThinkingLevel?.value || "";
+  const structuredOutputs = !!els.descStructuredOutputs?.checked;
+
+  if (els.descPrompt && !String(els.descPrompt.value || "").trim()) {
+    els.descPrompt.value = EMPTY_DESC_PROMPT;
+  }
 
   const parts = [{ text: userPrompt }];
   for (const img of selectedImages) {
@@ -1185,6 +1181,10 @@ function buildDescribeBodyFromForm() {
   if (temperature !== "") generationConfig.temperature = temperature;
   if (mediaResolution) generationConfig.mediaResolution = mediaResolution;
   if (thinkingLevel) generationConfig.thinkingConfig = { thinkingLevel };
+  if (structuredOutputs) {
+    generationConfig.responseMimeType = "application/json";
+    generationConfig.responseJsonSchema = DESC_STRUCTURED_OUTPUT_SCHEMA;
+  }
   if (Object.keys(generationConfig).length) body.generationConfig = generationConfig;
 
   return body;
@@ -1431,11 +1431,12 @@ function resetAllFieldsToBlankState() {
 
   // desc fields: default full preset
   if (els.descPreset) els.descPreset.value = "full";
-  if (els.descPrompt) els.descPrompt.value = "";
-  if (els.descSystemPrompt) els.descSystemPrompt.value = DESCRIBE_PRESETS.full;
+  if (els.descPrompt) els.descPrompt.value = DESCRIBE_PROMPT_PRESETS.full;
+  if (els.descSystemPrompt) els.descSystemPrompt.value = DESCRIBE_SYSTEM_PROMPT_BASE;
   if (els.descTemperature) els.descTemperature.value = "";
   if (els.descMediaResolution) els.descMediaResolution.value = "";
   if (els.descThinkingLevel) els.descThinkingLevel.value = "";
+  if (els.descStructuredOutputs) els.descStructuredOutputs.checked = false;
   if (els.descRequestBodyJson) els.descRequestBodyJson.value = "";
 
   setUiMode("form");
@@ -1487,6 +1488,7 @@ function wireEvents() {
     els.descTemperature?.addEventListener(evt, persistBase);
     els.descMediaResolution?.addEventListener(evt, persistBase);
     els.descThinkingLevel?.addEventListener(evt, persistBase);
+    els.descStructuredOutputs?.addEventListener(evt, persistBase);
     els.descRequestBodyJson?.addEventListener(evt, persistBase);
   });
 
@@ -1628,7 +1630,10 @@ function init() {
   // ensure describe preset default = full
   const pid = els.descPreset?.value || "full";
   if (els.descSystemPrompt && !els.descSystemPrompt.value.trim()) {
-    els.descSystemPrompt.value = DESCRIBE_PRESETS[pid] || DESCRIBE_PRESETS.full;
+    els.descSystemPrompt.value = DESCRIBE_SYSTEM_PROMPT_BASE;
+  }
+  if (els.descPrompt && !els.descPrompt.value.trim()) {
+    els.descPrompt.value = DESCRIBE_PROMPT_PRESETS[pid] || DESCRIBE_PROMPT_PRESETS.full;
   }
 
   // apply stored modes/tab

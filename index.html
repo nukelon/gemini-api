@@ -187,9 +187,9 @@
           <div id="descFormModeWrap">
             <div class="grid">
               <label class="field">
-                <span class="label">提示词（可选，作为补充要求）</span>
-                <textarea id="descPrompt" rows="5" placeholder="可留空。可写：更偏电影感/更接近二次元/强调服装细节/保留logo等。"></textarea>
-                <span class="hint">反推输出要求：仅输出英文提示词本体，不输出负面提示词、也不输出解释。</span>
+                <span class="label">提示词（必填，反推主指令）</span>
+                <textarea id="descPrompt" rows="9" required spellcheck="false" placeholder="请填写反推提示词要求（切换 JSON 模式时如为空将自动写入空提示词）。"></textarea>
+                <span class="hint">反推输出要求：仅输出英文提示词本体，不输出负面提示词、也不输出解释；需使用格式化结构。</span>
               </label>
 
               <label class="field full">
@@ -223,6 +223,14 @@
                   <option value="HIGH">HIGH</option>
                 </select>
               </label>
+              <div class="field">
+                <span class="label">Structured outputs（可选）</span>
+                <label class="checkbox">
+                  <input id="descStructuredOutputs" type="checkbox" />
+                  <span>启用 responseMimeType=application/json + responseJsonSchema（返回 {"prompt":"..."}）</span>
+                </label>
+              </div>
+
             </div>
           </div>
 
